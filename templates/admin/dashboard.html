@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-5">
+        <div>
+            <h2 class="fw-bold" style="color: #1e293b;">Panel de Control</h2>
+            <p class="text-muted mb-0">Bienvenido, Profesor.</p>
+        </div>
+        <div>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline-danger btn-sm">
+                <i class="fas fa-sign-out-alt me-2"></i>Cerrar Sesión
+            </a>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-5">
+        <div class="col-md-3">
+            <div class="glass-card d-flex align-items-center justify-content-between p-4 h-100 border-start border-4 border-primary">
+                <div>
+                    <h6 class="text-muted text-uppercase small fw-bold mb-1">Inventario Total</h6>
+                    <h2 class="display-5 fw-bold text-primary mb-0">{{ total_equipos }}</h2>
+                    <span class="text-muted small">Equipos registrados</span>
+                </div>
+                <div class="bg-primary bg-opacity-10 p-3 rounded-circle">
+                    <i class="fas fa-desktop fa-2x text-primary"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="glass-card d-flex align-items-center justify-content-between p-4 h-100 border-start border-4 border-danger">
+                <div>
+                    <h6 class="text-muted text-uppercase small fw-bold mb-1">Reparaciones</h6>
+                    <h2 class="display-5 fw-bold text-danger mb-0">{{ reparaciones }}</h2>
+                    <span class="text-muted small">Pendientes de revisión</span>
+                </div>
+                <div class="bg-danger bg-opacity-10 p-3 rounded-circle">
+                    <i class="fas fa-tools fa-2x text-danger"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <h5 class="card-title">{{ alumnos_activos }}</h5>
+                    <p class="card-text">Alumnos Activos</p>
+                    <a href="{{ url_for('gestionar_alumnos') }}" class="text-white text-decoration-none">
+                        Ver detalles →
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">{{ total_entregas }}</h5>
+                    <p class="card-text">Tareas Entregadas</p>
+                    <a href="{{ url_for('ver_entregas_alumnos') }}" class="text-white text-decoration-none">
+                        Revisar →
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h5 class="fw-bold mb-4" style="color: #1e293b;">Gestión Rápida</h5>
+    <div class="row g-4">
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('inventario') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-box-open fa-3x text-primary mb-3"></i>
+                    <h6 class="fw-bold text-dark">Ver Inventario</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('inventario') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-qrcode fa-3x text-dark mb-3"></i>
+                    <h6 class="fw-bold text-dark">Generar QRs</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('mantenimiento') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-clipboard-list fa-3x text-danger mb-3"></i>
+                    <h6 class="fw-bold text-dark">Bitácora Fallas</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_anuncios') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-bullhorn fa-3x text-warning mb-3"></i>
+                    <h6 class="fw-bold text-dark">Publicar Avisos</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_grados') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-chalkboard-teacher fa-3x text-info mb-3"></i>
+                    <h6 class="fw-bold text-dark">Planeación Semanal</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_cuestionarios') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-file-signature fa-3x mb-3" style="color: #8b5cf6;"></i>
+                    <h6 class="fw-bold text-dark">Asignar Examen</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_horarios') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-clock fa-3x text-success mb-3"></i>
+                    <h6 class="fw-bold text-dark">Gestionar Horarios</h6>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

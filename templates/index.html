@@ -1,0 +1,236 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<style>
+    /* Ajuste para que el contenido ocupe todo el ancho pero respetando bordes */
+    main.container {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* Estilo específico para la tarjeta de anuncio profesional */
+    .anuncio-card {
+        background: white;
+        border-radius: 12px;
+        border-left: 5px solid #d97706; /* Ámbar elegante (no amarillo pollo) */
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+        transition: transform 0.2s;
+    }
+    
+    .anuncio-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+
+    .anuncio-icon {
+        background-color: #fffbeb; /* Fondo crema muy suave */
+        color: #d97706;
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+    }
+</style>
+
+<div class="hero">
+    <div class="container">
+        <div class="hero-icon">
+            <i class="fas fa-laptop-code"></i>
+        </div>
+        <h1>Taller de Cómputo</h1>
+        <h2>Escuela "Mariano Escobedo"</h2>
+        <a href="#" class="mission-btn" onclick="toggleMission(); return false;">
+            <i class="fas fa-info-circle me-2"></i>Nuestra Misión
+        </a>
+
+        <div id="missionCard" style="display: none;">
+            <div class="mission-card">
+                <div class="row">
+                    <div class="col-md-6 mb-3 mb-md-0">
+                        <h6><i class="fas fa-bullseye me-2"></i>Misión</h6>
+                        <p>Integrar herramientas digitales en el proceso educativo para desarrollar competencias tecnológicas que preparen a nuestros estudiantes para los desafíos del mundo digital.</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-lightbulb me-2"></i>Visión</h6>
+                        <p>Liderar la transformación tecnológica escolar, creando un espacio innovador donde cada estudiante desarrolle habilidades digitales esenciales para su futuro académico y profesional.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="main-content">
+    <div class="container">
+        
+        {% if anuncios %}
+        <div class="row justify-content-center mb-5 mt-5 pt-4">
+            <div class="col-lg-10">
+                <div class="d-flex align-items-center mb-3 ps-2">
+                    <span class="badge bg-white text-dark border shadow-sm me-2 rounded-pill px-3 py-2">
+                        <i class="fas fa-bell text-warning me-2"></i>Avisos
+                    </span>
+                    <h5 class="fw-bold text-secondary mb-0">Tablón de Novedades</h5>
+                </div>
+
+                {% for anuncio in anuncios %}
+                <div class="anuncio-card p-4 mb-3">
+                    <div class="d-flex align-items-start">
+                        <div class="anuncio-icon flex-shrink-0 me-3 d-none d-md-flex">
+                            <i class="fas fa-bullhorn fa-lg"></i>
+                        </div>
+                        
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <h5 class="fw-bold text-dark mb-0" style="letter-spacing: -0.5px;">
+                                    {{ anuncio.titulo }}
+                                </h5>
+                                <small class="text-muted fw-bold ms-3" style="font-size: 0.85rem;">
+                                    {{ anuncio.fecha.strftime('%d/%m/%Y') }}
+                                </small>
+                            </div>
+                            <p class="text-secondary mb-0" style="line-height: 1.6;">
+                                {{ anuncio.contenido }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        <div class="custom-tabs mt-5">
+            <button class="tab-btn active" onclick="showTab('horarios')">
+                <i class="fas fa-clock me-2"></i>Horarios
+            </button>
+            <button class="tab-btn" onclick="showTab('recursos')">
+                <i class="fas fa-download me-2"></i>Recursos
+            </button>
+            <button class="tab-btn" onclick="showTab('practica')">
+                <i class="fas fa-keyboard me-2"></i>Práctica
+            </button>
+        </div>
+
+        <div id="horarios" class="tab-content-custom active">
+            <div class="glass-card">
+                <h4 class="card-header-custom">
+                    <i class="fas fa-calendar-alt me-2"></i>Cronograma Semanal
+                </h4>
+                <table class="schedule-table">
+                    <thead>
+                        <tr>
+                            <th>Día</th>
+                            <th>Grados</th>
+                            <th>Horario</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if horarios %}
+                            {% for h in horarios %}
+                            <tr>
+                                <td>{{ h.dia }}</td>
+                                <td>{{ h.grados }}</td>
+                                <td>{{ h.hora }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="3" class="text-center text-muted py-4">
+                                    Horarios por definir. Consulte con el profesor.
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="recursos" class="tab-content-custom">
+            <div class="row g-4">
+                <div class="col-md-4">
+                    <div class="resource-card">
+                        <i class="fas fa-file-pdf" style="color: #ef4444;"></i>
+                        <h6>Reglamento del Taller</h6>
+                        <a href="#" class="download-btn">Descargar PDF</a>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="resource-card">
+                        <i class="fas fa-file-word" style="color: #3b82f6;"></i>
+                        <h6>Manual de Word</h6>
+                        <a href="#" class="download-btn">Descargar Manual</a>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="resource-card">
+                        <i class="fas fa-shield-alt" style="color: #10b981;"></i>
+                        <h6>Guía de Seguridad</h6>
+                        <a href="#" class="download-btn">Leer Guía</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="practica" class="tab-content-custom">
+            <div class="glass-card text-center">
+                <h5 style="color: #64748b; margin-bottom: 30px; font-weight: 600;">Plataformas de Práctica</h5>
+                <div class="practice-links">
+                    <a href="https://code.org" target="_blank" class="practice-link">
+                        <i class="fas fa-code"></i>
+                        Code.org
+                    </a>
+                    <a href="#" class="practice-link">
+                        <i class="fas fa-keyboard"></i>
+                        Mecanet
+                    </a>
+                    <a href="https://scratch.mit.edu" target="_blank" class="practice-link">
+                        <i class="fas fa-cube"></i>
+                        Scratch
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-5 mb-5">
+            <h3 class="section-title">Actividades por Grado</h3>
+            <div class="row g-4">
+                {% for i in range(1, 7) %}
+                <div class="col-lg-2 col-md-4 col-6">
+                    <a href="{{ url_for('ver_grado', numero_grado=i) }}" class="text-decoration-none text-dark">
+                        <div class="grade-card">
+                            <div class="grade-number">{{ i }}°</div>
+                            <span class="grade-badge">Ver actividades</span>
+                        </div>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function showTab(tabId) {
+        document.querySelectorAll('.tab-content-custom').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        document.getElementById(tabId).classList.add('active');
+        event.target.closest('.tab-btn').classList.add('active');
+    }
+
+    function toggleMission() {
+        const card = document.getElementById('missionCard');
+        card.style.display = card.style.display === 'none' ? 'block' : 'none';
+    }
+</script>
+
+{% endblock %}

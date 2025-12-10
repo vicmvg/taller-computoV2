@@ -1,0 +1,185 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<style>
+    /* Estilos exclusivos para el Login de Niños */
+    .login-kids-bg {
+        /* Un fondo divertido o tecnológico suave */
+        background-color: #f8fafc;
+        background-image: radial-gradient(#3b82f6 1px, transparent 1px);
+        background-size: 30px 30px;
+    }
+    
+    .card-kids {
+        border: none;
+        border-radius: 20px;
+        box-shadow: 0 15px 35px rgba(59, 130, 246, 0.15);
+        overflow: hidden;
+        transition: transform 0.3s;
+    }
+
+    .card-kids:hover {
+        transform: translateY(-5px);
+    }
+
+    .header-kids {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        padding: 30px;
+        text-align: center;
+        color: white;
+    }
+
+    .input-kid {
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 15px;
+        font-size: 1.1rem;
+        text-align: center;
+        background-color: #f8fafc;
+    }
+    .input-kid:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        outline: none;
+    }
+
+    .btn-start {
+        background: #10b981; /* Verde éxito */
+        border: none;
+        border-radius: 50rem;
+        padding: 15px;
+        font-size: 1.2rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+        transition: all 0.3s;
+    }
+    .btn-start:hover {
+        background: #059669;
+        transform: scale(1.02);
+    }
+
+    .password-toggle {
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        cursor: pointer;
+        color: #64748b;
+        transition: color 0.2s;
+    }
+    .password-toggle:hover {
+        color: #3b82f6;
+    }
+
+    .info-box {
+        background: #eff6ff;
+        border: 2px dashed #3b82f6;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+</style>
+
+<div class="row justify-content-center align-items-center" style="min-height: 80vh;">
+    <div class="col-md-6 col-lg-5">
+        
+        <div class="card-kids bg-white">
+            <div class="header-kids">
+                <i class="fas fa-rocket fa-4x mb-3 animate__animated animate__bounce"></i>
+                <h2 class="fw-bold mb-0">¡Zona de Alumnos!</h2>
+                <p class="mb-0 opacity-75">Ingresa para cumplir tus misiones</p>
+            </div>
+
+            <div class="p-4 p-md-5">
+                <!-- Caja informativa -->
+                <div class="info-box text-center">
+                    <i class="fas fa-info-circle text-primary mb-2"></i>
+                    <p class="mb-0 small text-secondary">
+                        <strong>¿No tienes usuario?</strong><br>
+                        Pídele a tu profesor que te cree una cuenta
+                    </p>
+                </div>
+
+                <form action="{{ url_for('login_alumnos') }}" method="POST">
+                    
+                    <!-- Campo de Usuario -->
+                    <div class="mb-4 text-center">
+                        <label class="form-label fw-bold text-secondary mb-3">
+                            <i class="fas fa-user me-2"></i>Tu Usuario
+                        </label>
+                        <input 
+                            type="text" 
+                            name="username" 
+                            class="form-control input-kid" 
+                            placeholder="Ejemplo: 6AMatias2007" 
+                            required 
+                            autofocus 
+                            autocomplete="username">
+                        <small class="text-muted d-block mt-2">
+                            El usuario que te dio tu profesor
+                        </small>
+                    </div>
+
+                    <!-- Campo de Contraseña -->
+                    <div class="mb-4 text-center position-relative">
+                        <label class="form-label fw-bold text-secondary mb-3">
+                            <i class="fas fa-lock me-2"></i>Tu Contraseña
+                        </label>
+                        <div class="position-relative">
+                            <input 
+                                type="password" 
+                                name="password" 
+                                id="passwordInput"
+                                class="form-control input-kid" 
+                                placeholder="••••••••" 
+                                required 
+                                autocomplete="current-password"
+                                style="padding-right: 50px;">
+                            <span class="password-toggle" onclick="togglePassword()">
+                                <i class="fas fa-eye" id="toggleIcon"></i>
+                            </span>
+                        </div>
+                        <small class="text-muted d-block mt-2">
+                            La contraseña secreta que te dieron
+                        </small>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 btn-start text-white">
+                        ¡Comenzar Misión! <i class="fas fa-arrow-right ms-2"></i>
+                    </button>
+
+                </form>
+            </div>
+        </div>
+        
+        <div class="text-center mt-4">
+            <a href="{{ url_for('index') }}" class="text-muted text-decoration-none small">
+                <i class="fas fa-home me-1"></i> Regresar al inicio
+            </a>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    // Función para mostrar/ocultar contraseña
+    function togglePassword() {
+        const passwordInput = document.getElementById('passwordInput');
+        const toggleIcon = document.getElementById('toggleIcon');
+        
+        if (passwordInput.type === 'password') {
+            passwordInput.type = 'text';
+            toggleIcon.classList.remove('fa-eye');
+            toggleIcon.classList.add('fa-eye-slash');
+        } else {
+            passwordInput.type = 'password';
+            toggleIcon.classList.remove('fa-eye-slash');
+            toggleIcon.classList.add('fa-eye');
+        }
+    }
+</script>
+
+{% endblock %}

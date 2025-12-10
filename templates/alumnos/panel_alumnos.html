@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel del Alumno</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0d6efd 0%, #0b5ed7 100%);
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            margin: 5px 0;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        .sidebar .nav-link i {
+            width: 20px;
+            margin-right: 10px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border: none;
+        }
+        .star-rating {
+            color: #ffc107;
+            font-size: 1.2em;
+        }
+        .welcome-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .file-icon {
+            font-size: 3em;
+            color: #0d6efd;
+        }
+        .mission-card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background: white;
+        }
+        .text-purple {
+            color: #8b5cf6 !important;
+        }
+        .bg-purple {
+            background-color: #8b5cf6 !important;
+        }
+        .border-purple {
+            border-color: #8b5cf6 !important;
+        }
+        .group-hover:hover {
+            transform: translateY(-2px);
+            transition: transform 0.2s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4"><i class="bi bi-pc-display-horizontal"></i> Taller</h4>
+                    <div class="d-flex align-items-center mb-4">
+                        <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" 
+                             style="width: 50px; height: 50px; color: #0d6efd; font-weight: bold; font-size: 1.2em;">
+                            {{ session.alumno_nombre[0] }}
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="mb-0">{{ session.alumno_nombre }}</h6>
+                            <small>{{ session.alumno_grado }}</small>
+                        </div>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#">
+                                <i class="bi bi-house-door"></i> Inicio
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#entregas">
+                                <i class="bi bi-folder"></i> Mis Tareas
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#anuncios">
+                                <i class="bi bi-megaphone"></i> Anuncios
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#misiones">
+                                <i class="fas fa-clipboard-check"></i> Misiones
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('logout_alumnos') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <!-- Welcome Card -->
+                <div class="card welcome-card">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h3 class="card-title">¡Bienvenido, {{ session.alumno_nombre }}!</h3>
+                                <p class="card-text">
+                                    Grado: {{ session.alumno_grado }} | Usuario: {{ session.alumno_username }}
+                                </p>
+                                {% if entregas_calificadas > 0 %}
+                                <div class="d-flex align-items-center">
+                                    <span class="me-3">Promedio: <strong>{{ promedio }}/5</strong></span>
+                                    <div class="star-rating">
+                                        {% for i in range(promedio|int) %}
+                                            <i class="bi bi-star-fill"></i>
+                                        {% endfor %}
+                                        {% if promedio % 1 >= 0.5 %}
+                                            <i class="bi bi-star-half"></i>
+                                        {% endif %}
+                                        {% for i in range(5 - promedio|int - (1 if promedio % 1 >= 0.5 else 0)) %}
+                                            <i class="bi bi-star"></i>
+                                        {% endfor %}
+                                    </div>
+                                    <span class="ms-3">{{ entregas_calificadas }} tarea(s) calificada(s)</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <i class="bi bi-person-circle" style="font-size: 5rem; opacity: 0.8;"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Upload Section -->
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="bi bi-cloud-arrow-up"></i> Subir Nueva Tarea</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('subir_tarea') }}" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="archivo" class="form-label">Seleccionar archivo</label>
+                                <input class="form-control" type="file" id="archivo" name="archivo" required>
+                                <div class="form-text">Formatos permitidos: PDF, Word, PowerPoint, imágenes, etc.</div>
+                            </div>
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> El archivo se asociará automáticamente a tu usuario.
+                                No necesitas escribir tu nombre nuevamente.
+                            </div>
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-upload"></i> Enviar Tarea
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Intelligence Missions Section -->
+                <div class="card" id="misiones">
+                    <div class="card-header bg-purple text-white">
+                        <h5 class="mb-0"><i class="fas fa-clipboard-check"></i> Misiones de Inteligencia</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if cuestionarios %}
+                        <p class="text-muted mb-4">Cuestionarios y exámenes pendientes para completar.</p>
+                        
+                        <div class="row">
+                            {% for quest in cuestionarios %}
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="mission-card p-3 h-100 border border-2 border-purple">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="bg-purple bg-opacity-10 text-purple rounded-circle p-2 me-3">
+                                            <i class="fas fa-clipboard-check fa-lg"></i>
+                                        </div>
+                                        <div>
+                                            <h6 class="fw-bold mb-0">{{ quest.titulo }}</h6>
+                                            {% if quest.descripcion %}
+                                            <small class="text-muted">{{ quest.descripcion[:50] }}{% if quest.descripcion|length > 50 %}...{% endif %}</small>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-grid">
+                                        <a href="{{ quest.url }}" target="_blank" 
+                                           class="btn btn-outline-purple btn-sm">
+                                            <i class="fab fa-google me-1"></i> Ir al Cuestionario
+                                        </a>
+                                    </div>
+                                    
+                                    {% if quest.fecha_limite %}
+                                    <div class="mt-3 pt-3 border-top">
+                                        <small class="text-muted">
+                                            <i class="fas fa-clock me-1"></i>
+                                            Límite: {{ quest.fecha_limite.strftime('%d/%m/%Y') }}
+                                        </small>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-clipboard-check fa-4x text-muted mb-3"></i>
+                            <h5 class="text-muted">No hay misiones asignadas</h5>
+                            <p class="text-muted">No tienes cuestionarios pendientes en este momento.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Recent Deliveries -->
+                <div class="card" id="entregas">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Mis Entregas Recientes</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if entregas %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Archivo</th>
+                                        <th>Calificación</th>
+                                        <th>Comentarios</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for entrega in entregas %}
+                                    <tr>
+                                        <td>{{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') }}</td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <i class="bi bi-file-earmark me-2"></i>
+                                                {% if entrega.archivo_url.startswith('http') %}
+                                                    <a href="{{ entrega.archivo_url }}" target="_blank" class="text-decoration-none">
+                                                        Ver archivo
+                                                    </a>
+                                                {% else %}
+                                                    <a href="{{ url_for('uploaded_file', filename=entrega.archivo_url) }}" 
+                                                       target="_blank" class="text-decoration-none">
+                                                        Ver archivo
+                                                    </a>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            {% if entrega.estrellas > 0 %}
+                                            <div class="star-rating">
+                                                {% for i in range(entrega.estrellas) %}
+                                                    <i class="bi bi-star-fill"></i>
+                                                {% endfor %}
+                                                {% for i in range(5 - entrega.estrellas) %}
+                                                    <i class="bi bi-star"></i>
+                                                {% endfor %}
+                                                <span class="ms-2">{{ entrega.estrellas }}/5</span>
+                                            </div>
+                                            {% else %}
+                                            <span class="text-muted">Pendiente</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if entrega.comentarios %}
+                                            <small>{{ entrega.comentarios }}</small>
+                                            {% else %}
+                                            <span class="text-muted">Sin comentarios</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="bi bi-folder-x file-icon"></i>
+                            <h5 class="mt-3">No hay entregas aún</h5>
+                            <p class="text-muted">Sube tu primera tarea usando el formulario de arriba.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Announcements -->
+                <div class="card" id="anuncios">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-megaphone"></i> Anuncios Recientes</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if anuncios %}
+                        <div class="list-group">
+                            {% for anuncio in anuncios %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ anuncio.titulo }}</h6>
+                                    <small class="text-muted">{{ anuncio.fecha.strftime('%d/%m/%Y') }}</small>
+                                </div>
+                                <p class="mb-1">{{ anuncio.contenido }}</p>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-3">No hay anuncios por el momento.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

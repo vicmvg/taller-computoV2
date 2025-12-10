@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entregas de Alumnos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #343a40;
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+        }
+        .star-rating {
+            color: #ffc107;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4">Panel del Profesor</h4>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
+                                <i class="bi bi-speedometer2"></i> Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('inventario') }}">
+                                <i class="bi bi-pc-display"></i> Inventario
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('mantenimiento') }}">
+                                <i class="bi bi-tools"></i> Mantenimiento
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('gestionar_alumnos') }}">
+                                <i class="bi bi-people"></i> Alumnos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="{{ url_for('ver_entregas_alumnos') }}">
+                                <i class="bi bi-folder-check"></i> Entregas
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('gestionar_anuncios') }}">
+                                <i class="bi bi-megaphone"></i> Anuncios
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <h2><i class="bi bi-folder-check"></i> Entregas de Alumnos</h2>
+                
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <!-- Statistics by Student -->
+                <div class="row mb-4">
+                    {% for nombre, entregas_alumno in entregas_por_alumno.items() %}
+                    <div class="col-md-4 mb-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title">{{ nombre }}</h6>
+                                <p class="card-text">
+                                    <small class="text-muted">{{ entregas_alumno[0].grado_grupo }}</small><br>
+                                    Entregas: {{ entregas_alumno|length }}<br>
+                                    {% set calificadas = entregas_alumno|selectattr('estrellas', 'gt', 0)|list %}
+                                    Calificadas: {{ calificadas|length }}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <!-- All Deliveries Table -->
+                <div class="card">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Alumno</th>
+                                        <th>Grado</th>
+                                        <th>Archivo</th>
+                                        <th>Calificación</th>
+                                        <th>Comentarios</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for entrega in entregas %}
+                                    <tr>
+                                        <td>{{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') }}</td>
+                                        <td>{{ entrega.nombre_alumno }}</td>
+                                        <td>{{ entrega.grado_grupo }}</td>
+                                        <td>
+                                            {% if entrega.archivo_url.startswith('http') %}
+                                                <a href="{{ entrega.archivo_url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                                    <i class="bi bi-download"></i> Descargar
+                                                </a>
+                                            {% else %}
+                                                <a href="{{ url_for('uploaded_file', filename=entrega.archivo_url) }}" 
+                                                   target="_blank" class="btn btn-sm btn-outline-primary">
+                                                    <i class="bi bi-download"></i> Descargar
+                                                </a>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if entrega.estrellas > 0 %}
+                                            <div class="star-rating">
+                                                {% for i in range(entrega.estrellas) %}
+                                                    <i class="bi bi-star-fill"></i>
+                                                {% endfor %}
+                                                {% for i in range(5 - entrega.estrellas) %}
+                                                    <i class="bi bi-star"></i>
+                                                {% endfor %}
+                                            </div>
+                                            {% else %}
+                                            <span class="text-muted">Sin calificar</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if entrega.comentarios %}
+                                            <small>{{ entrega.comentarios }}</small>
+                                            {% else %}
+                                            <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-warning" 
+                                                    data-bs-toggle="modal" 
+                                                    data-bs-target="#gradeModal{{ entrega.id }}">
+                                                <i class="bi bi-star"></i> Calificar
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    
+                                    <!-- Grade Modal for each delivery -->
+                                    <div class="modal fade" id="gradeModal{{ entrega.id }}" tabindex="-1">
+                                        <div class="modal-dialog">
+                                            <div class="modal-content">
+                                                <div class="modal-header">
+                                                    <h5 class="modal-title">Calificar Entrega</h5>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                </div>
+                                                <form method="POST" action="{{ url_for('calificar_entrega', id=entrega.id) }}">
+                                                    <div class="modal-body">
+                                                        <p>
+                                                            <strong>Alumno:</strong> {{ entrega.nombre_alumno }}<br>
+                                                            <strong>Fecha:</strong> {{ entrega.fecha_entrega.strftime('%d/%m/%Y') }}
+                                                        </p>
+                                                        <div class="mb-3">
+                                                            <label class="form-label">Calificación (1-5 estrellas)</label>
+                                                            <div class="star-rating mb-2">
+                                                                {% for i in range(1, 6) %}
+                                                                <div class="form-check form-check-inline">
+                                                                    <input class="form-check-input" type="radio" 
+                                                                           name="estrellas" id="star{{ i }}_{{ entrega.id }}" 
+                                                                           value="{{ i }}" {% if entrega.estrellas == i %}checked{% endif %}>
+                                                                    <label class="form-check-label" for="star{{ i }}_{{ entrega.id }}">
+                                                                        {% for j in range(i) %}
+                                                                        <i class="bi bi-star-fill"></i>
+                                                                        {% endfor %}
+                                                                    </label>
+                                                                </div>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                        <div class="mb-3">
+                                                            <label class="form-label">Comentarios</label>
+                                                            <textarea class="form-control" name="comentarios" rows="3">{{ entrega.comentarios or '' }}</textarea>
+                                                        </div>
+                                                    </div>
+                                                    <div class="modal-footer">
+                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                        <button type="submit" class="btn btn-primary">Guardar Calificación</button>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

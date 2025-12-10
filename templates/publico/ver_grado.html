@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="bg-primary py-5 text-white mb-5 position-relative overflow-hidden" style="border-radius: 0 0 30px 30px;">
+    <div class="container position-relative" style="z-index: 2;">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <span class="badge bg-white text-primary mb-2 shadow-sm">Primaria Mariano Escobedo</span>
+                <h1 class="display-4 fw-bold mb-0">Actividades de {{ grado }}° Grado</h1>
+            </div>
+            <div class="col-md-4 text-end d-none d-md-block">
+                <i class="fas fa-book-reader fa-6x opacity-25"></i>
+            </div>
+        </div>
+    </div>
+    <div style="position: absolute; top: -50px; right: -50px; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%;"></div>
+</div>
+
+<div class="container pb-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <a href="{{ url_for('index') }}" class="text-decoration-none text-muted fw-bold">
+                    <i class="fas fa-arrow-left me-2"></i>Regresar
+                </a>
+                {% if actividad %}
+                <small class="text-muted">Actualizado: {{ actividad.fecha_actualizacion.strftime('%d/%m/%Y') }}</small>
+                {% endif %}
+            </div>
+
+            <div class="glass-card p-5 border-top border-5 border-info shadow-lg">
+                {% if actividad %}
+                    <h2 class="fw-bold text-dark mb-4">{{ actividad.titulo }}</h2>
+                    
+                    <div class="text-secondary" style="font-size: 1.1rem; line-height: 1.8; white-space: pre-line;">
+                        {{ actividad.descripcion }}
+                    </div>
+
+                    <hr class="my-5 opacity-25">
+
+                    <div class="alert alert-info border-0 d-flex align-items-center">
+                        <i class="fas fa-info-circle fa-2x me-3 text-info"></i>
+                        <div>
+                            <strong>Nota para padres:</strong>
+                            <p class="mb-0 small">Si tienen dudas sobre esta actividad, pueden contactar al profesor en el horario de atención.</p>
+                        </div>
+                    </div>
+
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-pencil-ruler fa-4x text-muted opacity-25 mb-3"></i>
+                        <h3 class="text-muted">Sin actividades publicadas</h3>
+                        <p class="text-muted">El profesor aún no ha subido la planeación para esta semana.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

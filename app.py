@@ -12,9 +12,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_desarrollo'  # Cambiar en producción
 
-# 1. Configuración de Base de Datos (Automática: Local vs Nube)
-# Si existe DATABASE_URL (Render), úsala. Si no, usa taller.db local.
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///taller.db')
+# --- CONFIGURACIÓN DE BASE DE DATOS ---
+
+# Obtener la URL de la variable de entorno
+database_url = os.environ.get('DATABASE_URL', 'sqlite:///taller.db')
+
+# FIX PARA RENDER/NEON: 
+# Si la URL comienza con "postgres://", la cambiamos a "postgresql://" 
+# porque SQLAlchemy moderno ya no acepta la versión corta.
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)

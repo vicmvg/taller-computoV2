@@ -726,8 +726,11 @@ def uploaded_file(filename):
 
 # --- INICIALIZADOR ---
 
+# ESTO ES LO NUEVO: Lo sacamos del "if" y lo ponemos solito.
+# Así Gunicorn lo leerá y creará las tablas en Neon al arrancar.
+with app.app_context():
+    db.create_all()
+
+# Esto se queda solo para cuando pruebas en tu PC
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all() # Crea las tablas si no existen
-        print("Base de datos y tablas verificadas.")
     app.run(debug=True, port=5000)

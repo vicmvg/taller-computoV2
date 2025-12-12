@@ -33,7 +33,8 @@ db = SQLAlchemy(app)
 S3_ENDPOINT = os.environ.get('S3_ENDPOINT') 
 S3_KEY = os.environ.get('S3_KEY')
 S3_SECRET = os.environ.get('S3_SECRET')
-S3_BUCKET = 'taller-computo-files' # Nombre de tu bucket futuro
+# CAMBIO: Ahora sí lee la variable, y si no existe usa el de ejemplo por seguridad
+S3_BUCKET = os.environ.get('S3_BUCKET', 'taller-computo-files')
 
 # Carpeta local de respaldo si no hay S3
 UPLOAD_FOLDER = 'uploads'

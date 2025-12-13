@@ -2,7 +2,7 @@ import os
 import boto3
 import qrcode
 import io  # Para manejar archivos en memoria
-from datetime import datetime, timedelta  # Añadido timedelta aquí
+from datetime import datetime, timedelta, date  # Añadido timedelta aquí
 from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
@@ -99,6 +99,16 @@ class EntregaAlumno(db.Model):
     estrellas = db.Column(db.Integer, default=0) # Calificación 1-5
     comentarios = db.Column(db.Text)
     fecha_entrega = db.Column(db.DateTime, default=datetime.utcnow)
+
+# --- NUEVO MODELO PARA ASISTENCIA ---
+class Asistencia(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    fecha = db.Column(db.Date, default=datetime.utcnow)
+    estado = db.Column(db.String(10)) # 'P'=Presente, 'F'=Falta, 'R'=Retardo, 'J'=Justificado
+    
+    # Relación para saber de quién es la asistencia
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True))
 
 # --- MODELO PARA ACTIVIDADES POR GRADO ---
 class ActividadGrado(db.Model):
@@ -287,24 +297,32 @@ def admin_dashboard():
                          alumnos_activos=alumnos_activos,
                          total_entregas=total_entregas)
 
-# --- RUTAS DE GESTIÓN DE ALUMNOS (DESDE EL PROFESOR) ---
+# --- RUTAS DE GESTIÓN DE ALUMNOS Y ASISTENCIA ---
 
 @app.route('/admin/alumnos')
 def gestionar_alumnos():
     if 'user' not in session or session.get('tipo_usuario') != 'profesor':
         return redirect(url_for('login'))
     
-    # Obtener todos los alumnos ordenados por grado y nombre
-    alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    # 1. Obtener el filtro si existe (Ej: ?grado=6A)
+    filtro_grado = request.args.get('grado')
     
-    # Obtener estadísticas
+    query = UsuarioAlumno.query
+    
+    # Si hay filtro, aplicarlo
+    if filtro_grado and filtro_grado != 'Todos':
+        query = query.filter_by(grado_grupo=filtro_grado)
+    
+    # Ordenar y ejecutar
+    alumnos = query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    
+    # Estadísticas básicas
     total_alumnos = UsuarioAlumno.query.count()
-    alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
-                         alumnos_activos=alumnos_activos)
+                         filtro_actual=filtro_grado)
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 def agregar_alumno():
@@ -375,6 +393,35 @@ def eliminar_alumno(id):
     
     flash(f'Alumno {nombre} eliminado del sistema.', 'warning')
     return redirect(url_for('gestionar_alumnos'))
+
+@app.route('/admin/asistencia/tomar', methods=['POST'])
+def tomar_asistencia():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Recibimos la fecha del formulario (o usamos hoy)
+    fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
+    fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+    
+    # Recorremos el formulario. Los campos vienen como "asistencia_IDALUMNO"
+    for key, value in request.form.items():
+        if key.startswith('asistencia_'):
+            alumno_id = int(key.split('_')[1])
+            estado = value # P, F, R
+            
+            # Buscar si ya se tomó lista ese día para ese alumno (para actualizar en vez de duplicar)
+            registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
+            
+            if registro:
+                registro.estado = estado # Actualizar
+            else:
+                # Crear nuevo
+                nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
+                db.session.add(nuevo)
+    
+    db.session.commit()
+    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
+    return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
 @app.route('/admin/alumnos/entregas')
 def ver_entregas_alumnos():

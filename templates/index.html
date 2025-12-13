@@ -178,19 +178,18 @@
         <div id="practica" class="tab-content-custom">
             <div class="glass-card text-center">
                 <h5 style="color: #64748b; margin-bottom: 30px; font-weight: 600;">Plataformas de Práctica</h5>
+                
                 <div class="practice-links">
-                    <a href="https://code.org" target="_blank" class="practice-link">
-                        <i class="fas fa-code"></i>
-                        Code.org
-                    </a>
-                    <a href="#" class="practice-link">
-                        <i class="fas fa-keyboard"></i>
-                        Mecanet
-                    </a>
-                    <a href="https://scratch.mit.edu" target="_blank" class="practice-link">
-                        <i class="fas fa-cube"></i>
-                        Scratch
-                    </a>
+                    {% if plataformas %}
+                        {% for p in plataformas %}
+                        <a href="{{ p.url }}" target="_blank" class="practice-link">
+                            <i class="{{ p.icono }}"></i>
+                            {{ p.nombre }}
+                        </a>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted w-100">No hay enlaces activos.</p>
+                    {% endif %}
                 </div>
             </div>
         </div>

@@ -122,6 +122,13 @@ class Horario(db.Model):
     grados = db.Column(db.String(50))  # Ej: "1° y 2°"
     hora = db.Column(db.String(50))    # Ej: "08:00 - 10:00 AM"
 
+# --- NUEVO MODELO PARA PLATAFORMAS ---
+class Plataforma(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(50))
+    url = db.Column(db.String(500))
+    icono = db.Column(db.String(50)) # Guardaremos la clase de FontAwesome (ej: 'fa-code')
+
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 
 def guardar_archivo(archivo):
@@ -183,10 +190,10 @@ def index():
     # Opcional: Podríamos ordenarlos por ID para que salgan en el orden que los agregaste
     horarios = Horario.query.all()
     
-    # 3. Obtener Grados para el menú (si lo usas)
-    # ... tu lógica existente ...
+    # 3. Obtener Plataformas
+    plataformas = Plataforma.query.all()
 
-    return render_template('index.html', anuncios=anuncios, horarios=horarios)
+    return render_template('index.html', anuncios=anuncios, horarios=horarios, plataformas=plataformas)
 
 # --- RUTAS DE AUTENTICACIÓN (LOGIN PROFESOR) ---
 
@@ -752,6 +759,42 @@ def eliminar_horario(id):
     db.session.commit()
     flash('Horario eliminado.', 'warning')
     return redirect(url_for('gestionar_horarios'))
+
+# --- GESTIÓN DE PLATAFORMAS ---
+
+@app.route('/admin/plataformas')
+def gestionar_plataformas():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    plataformas = Plataforma.query.all()
+    return render_template('admin/plataformas.html', plataformas=plataformas)
+
+@app.route('/admin/plataformas/agregar', methods=['POST'])
+def agregar_plataforma():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    nueva = Plataforma(
+        nombre=request.form['nombre'],
+        url=request.form['url'],
+        icono=request.form['icono']
+    )
+    db.session.add(nueva)
+    db.session.commit()
+    flash('Plataforma agregada.', 'success')
+    return redirect(url_for('gestionar_plataformas'))
+
+@app.route('/admin/plataformas/eliminar/<int:id>')
+def eliminar_plataforma(id):
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    p = Plataforma.query.get_or_404(id)
+    db.session.delete(p)
+    db.session.commit()
+    flash('Plataforma eliminada.', 'warning')
+    return redirect(url_for('gestionar_plataformas'))
 
 # --- RUTA PARA SERVIR ARCHIVOS LOCALES (IMPORTANTE) ---
 # Esta ruta permite ver las imágenes si están guardadas en tu PC

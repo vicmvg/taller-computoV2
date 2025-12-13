@@ -204,7 +204,7 @@ def guardar_archivo(archivo):
 def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     """
     Genera un PDF con el reporte de asistencia y lo guarda en S3
-    Retorna: URL del archivo PDF en S3 o ruta local
+    Retorna: (url_donde_se_guardo, buffer_pdf, nombre_archivo)
     """
     # Buffer en memoria para el PDF
     buffer = BytesIO()
@@ -247,7 +247,6 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     elements.append(Spacer(1, 20))
     
     # Obtener datos de asistencia
-    # Convertir fecha_inicio a objeto date si es string
     if isinstance(fecha_inicio, str):
         fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
     else:
@@ -257,10 +256,9 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     alumnos = UsuarioAlumno.query.filter_by(grado_grupo=grupo).all()
     
     # Crear tabla de datos
-    data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total Clases']]
+    data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total']]
     
     for idx, alumno in enumerate(alumnos, 1):
-        # Contar asistencias por tipo
         query = Asistencia.query.filter_by(alumno_id=alumno.id)
         
         if fecha_fin:
@@ -290,15 +288,12 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     
     # Estilo de la tabla
     tabla.setStyle(TableStyle([
-        # Encabezado
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 10),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        
-        # Cuerpo de la tabla
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
@@ -307,8 +302,6 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     ]))
     
     elements.append(tabla)
-    
-    # Estadísticas generales
     elements.append(Spacer(1, 30))
     
     total_alumnos = len(alumnos)
@@ -332,10 +325,8 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     )
     elements.append(Paragraph(stats_text, stats_style))
     
-    # Generar el PDF
+    # Generar el PDF en memoria
     doc.build(elements)
-    
-    # Guardar el PDF
     buffer.seek(0)
     
     # Nombre del archivo
@@ -346,37 +337,39 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     else:
         filename = f"asistencia_{grupo}_{fecha_str}.pdf"
     
-    # Guardar en S3 o localmente
+    # 🔥 CLAVE: Guardar en S3 pero SIN redirigir al usuario
+    file_url = None
     if S3_ENDPOINT and S3_KEY and S3_SECRET:
         try:
-            print(f"☁️ Subiendo reporte PDF a iDrive e2: {filename}")
+            print(f"☁️ Guardando PDF en iDrive e2: {filename}")
             s3 = boto3.client('s3',
                             endpoint_url=S3_ENDPOINT,
                             aws_access_key_id=S3_KEY,
                             aws_secret_access_key=S3_SECRET,
                             region_name='us-west-1')
             
-            # Subir desde el buffer
-            s3.upload_fileobj(buffer, S3_BUCKET, f"reportes/{filename}")
+            # Crear copia del buffer para subir a S3
+            buffer_copy = BytesIO(buffer.getvalue())
+            s3.upload_fileobj(buffer_copy, S3_BUCKET, f"reportes/{filename}")
             
             file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/reportes/{filename}"
-            print(f"✅ Reporte subido exitosamente: {file_url}")
-            return file_url
+            print(f"✅ PDF guardado en iDrive e2")
             
         except Exception as e:
-            print(f"❌ Error al subir PDF a S3: {str(e)}")
-            # Fallback local
-            pass
+            print(f"⚠️ No se pudo guardar en iDrive e2: {str(e)}")
     
-    # Guardar localmente como fallback
+    # También guardar localmente como respaldo
     os.makedirs(os.path.join(UPLOAD_FOLDER, 'reportes'), exist_ok=True)
     local_path = os.path.join(UPLOAD_FOLDER, 'reportes', filename)
     
     with open(local_path, 'wb') as f:
         f.write(buffer.getvalue())
     
-    print(f"💾 Reporte guardado localmente: {local_path}")
-    return f"reportes/{filename}"
+    print(f"💾 PDF guardado localmente como respaldo")
+    
+    # 🔥 IMPORTANTE: Devolver el buffer para descarga inmediata
+    buffer.seek(0)  # Resetear el puntero al inicio
+    return (file_url, buffer, filename)
 
 # --- RUTAS PRINCIPALES ---
 
@@ -615,30 +608,31 @@ def generar_reporte_asistencia(grupo):
     if 'user' not in session or session.get('tipo_usuario') != 'profesor':
         return redirect(url_for('login'))
     
-    # Obtener parámetros de fecha (opcional)
+    # Obtener fechas del reporte
     fecha_inicio = request.args.get('fecha_inicio', date.today().isoformat())
     fecha_fin = request.args.get('fecha_fin', None)
     
     try:
-        # Generar el PDF
-        pdf_url = generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin)
+        # 🔥 Generar el PDF (se guarda automáticamente en iDrive e2)
+        url_guardado, buffer_pdf, nombre_archivo = generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin)
         
-        # Si es URL de S3, redirigir directamente
-        if pdf_url.startswith('http'):
-            flash(f'Reporte generado y guardado en la nube: {pdf_url}', 'success')
-            return redirect(pdf_url)
+        # Mostrar mensaje al usuario
+        if url_guardado:
+            flash('✅ Reporte generado y guardado automáticamente en iDrive e2', 'success')
+        else:
+            flash('✅ Reporte generado correctamente', 'success')
         
-        # Si es ruta local, servir el archivo
-        filename = pdf_url.split('/')[-1]
-        return send_from_directory(
-            os.path.join(UPLOAD_FOLDER, 'reportes'),
-            filename,
+        # 🔥 DESCARGAR el PDF directamente al navegador del usuario
+        return send_file(
+            buffer_pdf,
+            mimetype='application/pdf',
             as_attachment=True,
-            download_name=filename
+            download_name=nombre_archivo
         )
         
     except Exception as e:
-        flash(f'Error al generar reporte: {str(e)}', 'danger')
+        print(f"❌ Error completo: {str(e)}")
+        flash(f'❌ Error al generar reporte: {str(e)}', 'danger')
         return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/descargar-reporte/<path:filename>')

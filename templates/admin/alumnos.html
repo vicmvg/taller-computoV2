@@ -299,6 +299,10 @@
                             
                             {% if filtro_actual and filtro_actual != 'Todos' %}
                             <div class="text-end mt-3">
+                                <a href="{{ url_for('generar_reporte_asistencia', grupo=filtro_actual, fecha_inicio=datetime.now().strftime('%Y-%m-%d')) }}" 
+                                   class="btn btn-info me-2" target="_blank">
+                                    <i class="fas fa-file-pdf me-2"></i>Generar Reporte PDF
+                                </a>
                                 <button type="submit" class="btn btn-success fw-bold">
                                     <i class="fas fa-save me-2"></i>Guardar Asistencia
                                 </button>

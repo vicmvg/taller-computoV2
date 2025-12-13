@@ -8,6 +8,15 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# --- NUEVOS IMPORTS PARA GENERAR PDF ---
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from io import BytesIO
+
 # --- CONFIGURACIÓN INICIAL ---
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_desarrollo'  # Cambiar en producción
@@ -191,6 +200,183 @@ def guardar_archivo(archivo):
     archivo.save(os.path.join(UPLOAD_FOLDER, filename))
     print(f"   💾 Archivo guardado localmente: {filename}")
     return filename
+
+def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
+    """
+    Genera un PDF con el reporte de asistencia y lo guarda en S3
+    Retorna: URL del archivo PDF en S3 o ruta local
+    """
+    # Buffer en memoria para el PDF
+    buffer = BytesIO()
+    
+    # Crear el documento PDF
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Estilo personalizado para el título
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1a5490'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Título del reporte
+    titulo = f"Reporte de Asistencia - Grupo {grupo}"
+    elements.append(Paragraph(titulo, title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Información de fechas
+    if fecha_fin:
+        periodo = f"Período: {fecha_inicio} a {fecha_fin}"
+    else:
+        periodo = f"Fecha: {fecha_inicio}"
+    
+    info_style = ParagraphStyle(
+        'Info',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=20,
+        alignment=TA_CENTER
+    )
+    elements.append(Paragraph(periodo, info_style))
+    elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", info_style))
+    elements.append(Spacer(1, 20))
+    
+    # Obtener datos de asistencia
+    # Convertir fecha_inicio a objeto date si es string
+    if isinstance(fecha_inicio, str):
+        fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
+    else:
+        fecha_inicio_obj = fecha_inicio
+    
+    # Buscar alumnos del grupo
+    alumnos = UsuarioAlumno.query.filter_by(grado_grupo=grupo).all()
+    
+    # Crear tabla de datos
+    data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total Clases']]
+    
+    for idx, alumno in enumerate(alumnos, 1):
+        # Contar asistencias por tipo
+        query = Asistencia.query.filter_by(alumno_id=alumno.id)
+        
+        if fecha_fin:
+            fecha_fin_obj = datetime.strptime(fecha_fin, '%Y-%m-%d').date() if isinstance(fecha_fin, str) else fecha_fin
+            query = query.filter(Asistencia.fecha >= fecha_inicio_obj, Asistencia.fecha <= fecha_fin_obj)
+        else:
+            query = query.filter_by(fecha=fecha_inicio_obj)
+        
+        presentes = query.filter_by(estado='P').count()
+        faltas = query.filter_by(estado='F').count()
+        retardos = query.filter_by(estado='R').count()
+        justificados = query.filter_by(estado='J').count()
+        total = presentes + faltas + retardos + justificados
+        
+        data.append([
+            str(idx),
+            alumno.nombre_completo,
+            str(presentes),
+            str(faltas),
+            str(retardos),
+            str(justificados),
+            str(total)
+        ])
+    
+    # Crear la tabla
+    tabla = Table(data, colWidths=[0.5*inch, 3*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1*inch, 1*inch])
+    
+    # Estilo de la tabla
+    tabla.setStyle(TableStyle([
+        # Encabezado
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        
+        # Cuerpo de la tabla
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+    ]))
+    
+    elements.append(tabla)
+    
+    # Estadísticas generales
+    elements.append(Spacer(1, 30))
+    
+    total_alumnos = len(alumnos)
+    total_registros = sum([
+        Asistencia.query.filter_by(alumno_id=a.id).filter(
+            Asistencia.fecha >= fecha_inicio_obj
+        ).count() for a in alumnos
+    ])
+    
+    stats_text = f"""
+    <b>Resumen del Grupo:</b><br/>
+    Total de alumnos: {total_alumnos}<br/>
+    Total de registros de asistencia: {total_registros}
+    """
+    
+    stats_style = ParagraphStyle(
+        'Stats',
+        parent=styles['Normal'],
+        fontSize=11,
+        spaceAfter=20
+    )
+    elements.append(Paragraph(stats_text, stats_style))
+    
+    # Generar el PDF
+    doc.build(elements)
+    
+    # Guardar el PDF
+    buffer.seek(0)
+    
+    # Nombre del archivo
+    fecha_str = fecha_inicio_obj.strftime('%Y%m%d')
+    if fecha_fin:
+        fecha_fin_str = datetime.strptime(fecha_fin, '%Y-%m-%d').strftime('%Y%m%d') if isinstance(fecha_fin, str) else fecha_fin.strftime('%Y%m%d')
+        filename = f"asistencia_{grupo}_{fecha_str}_a_{fecha_fin_str}.pdf"
+    else:
+        filename = f"asistencia_{grupo}_{fecha_str}.pdf"
+    
+    # Guardar en S3 o localmente
+    if S3_ENDPOINT and S3_KEY and S3_SECRET:
+        try:
+            print(f"☁️ Subiendo reporte PDF a iDrive e2: {filename}")
+            s3 = boto3.client('s3',
+                            endpoint_url=S3_ENDPOINT,
+                            aws_access_key_id=S3_KEY,
+                            aws_secret_access_key=S3_SECRET,
+                            region_name='us-west-1')
+            
+            # Subir desde el buffer
+            s3.upload_fileobj(buffer, S3_BUCKET, f"reportes/{filename}")
+            
+            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/reportes/{filename}"
+            print(f"✅ Reporte subido exitosamente: {file_url}")
+            return file_url
+            
+        except Exception as e:
+            print(f"❌ Error al subir PDF a S3: {str(e)}")
+            # Fallback local
+            pass
+    
+    # Guardar localmente como fallback
+    os.makedirs(os.path.join(UPLOAD_FOLDER, 'reportes'), exist_ok=True)
+    local_path = os.path.join(UPLOAD_FOLDER, 'reportes', filename)
+    
+    with open(local_path, 'wb') as f:
+        f.write(buffer.getvalue())
+    
+    print(f"💾 Reporte guardado localmente: {local_path}")
+    return f"reportes/{filename}"
 
 # --- RUTAS PRINCIPALES ---
 
@@ -422,6 +608,53 @@ def tomar_asistencia():
     db.session.commit()
     flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
     return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
+
+@app.route('/admin/reporte-asistencia/<grupo>')
+def generar_reporte_asistencia(grupo):
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Obtener parámetros de fecha (opcional)
+    fecha_inicio = request.args.get('fecha_inicio', date.today().isoformat())
+    fecha_fin = request.args.get('fecha_fin', None)
+    
+    try:
+        # Generar el PDF
+        pdf_url = generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin)
+        
+        # Si es URL de S3, redirigir directamente
+        if pdf_url.startswith('http'):
+            flash(f'Reporte generado y guardado en la nube: {pdf_url}', 'success')
+            return redirect(pdf_url)
+        
+        # Si es ruta local, servir el archivo
+        filename = pdf_url.split('/')[-1]
+        return send_from_directory(
+            os.path.join(UPLOAD_FOLDER, 'reportes'),
+            filename,
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        flash(f'Error al generar reporte: {str(e)}', 'danger')
+        return redirect(url_for('gestionar_alumnos'))
+
+@app.route('/admin/descargar-reporte/<path:filename>')
+def descargar_reporte(filename):
+    """Ruta alternativa para descargar reportes guardados localmente"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    try:
+        return send_from_directory(
+            os.path.join(UPLOAD_FOLDER, 'reportes'),
+            filename,
+            as_attachment=True
+        )
+    except Exception as e:
+        flash(f'Error al descargar reporte: {str(e)}', 'danger')
+        return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/alumnos/entregas')
 def ver_entregas_alumnos():

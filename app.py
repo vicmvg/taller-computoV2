@@ -499,16 +499,17 @@ def gestionar_alumnos():
     else:
         alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
     
-    # 3. Estadísticas (ESTO FALTABA)
+    # 3. Estadísticas
     total_alumnos = UsuarioAlumno.query.count()
-    alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count() # <--- Recuperamos esto
+    alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     
     # 4. Enviar todo a la plantilla
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
-                         alumnos_activos=alumnos_activos, # <--- Se lo enviamos al HTML
-                         filtro_actual=filtro)
+                         alumnos_activos=alumnos_activos,
+                         filtro_actual=filtro,
+                         fecha_hoy=date.today().isoformat())  # ← AGREGAR ESTA LÍNEA
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 def agregar_alumno():

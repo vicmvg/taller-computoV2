@@ -33,12 +33,20 @@ db = SQLAlchemy(app)
 S3_ENDPOINT = os.environ.get('S3_ENDPOINT') 
 S3_KEY = os.environ.get('S3_KEY')
 S3_SECRET = os.environ.get('S3_SECRET')
-# CAMBIO: Ahora sí lee la variable, y si no existe usa el de ejemplo por seguridad
-S3_BUCKET = os.environ.get('S3_BUCKET', 'taller-computo-files')
+S3_BUCKET = os.environ.get('S3_BUCKET_NAME', 'taller-computo')
 
 # Carpeta local de respaldo si no hay S3
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Crea la carpeta si no existe
+
+# Debug: Imprimir configuración al iniciar
+print("=" * 50)
+print("CONFIGURACIÓN S3/iDrive e2:")
+print(f"S3_ENDPOINT: {S3_ENDPOINT}")
+print(f"S3_BUCKET: {S3_BUCKET}")
+print(f"S3_KEY configurado: {bool(S3_KEY)}")
+print(f"S3_SECRET configurado: {bool(S3_SECRET)}")
+print("=" * 50)
 
 # --- MODELOS DE LA BASE DE DATOS ---
 
@@ -123,19 +131,45 @@ def guardar_archivo(archivo):
     """
     filename = secure_filename(archivo.filename)
     
+    # Debug: Verificar configuración
+    print(f"\n🔍 Intentando guardar archivo: {filename}")
+    print(f"   S3_ENDPOINT configurado: {bool(S3_ENDPOINT)}")
+    print(f"   S3_KEY configurado: {bool(S3_KEY)}")
+    print(f"   S3_SECRET configurado: {bool(S3_SECRET)}")
+    
     # Intento de S3
     if S3_ENDPOINT and S3_KEY and S3_SECRET:
         try:
-            s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT,
-                              aws_access_key_id=S3_KEY,
-                              aws_secret_access_key=S3_SECRET)
+            print(f"   ☁️  Intentando subir a iDrive e2...")
+            s3 = boto3.client('s3', 
+                            endpoint_url=S3_ENDPOINT,
+                            aws_access_key_id=S3_KEY,
+                            aws_secret_access_key=S3_SECRET,
+                            region_name='us-west-1')  # Región agregada
+            
+            # Reiniciar el puntero del archivo
+            archivo.seek(0)
+            
             s3.upload_fileobj(archivo, S3_BUCKET, filename)
-            return f"{S3_ENDPOINT}/{S3_BUCKET}/{filename}"
+            
+            # URL pública del archivo
+            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/{filename}"
+            print(f"   ✅ Archivo subido exitosamente a S3")
+            print(f"   🔗 URL: {file_url}")
+            
+            return file_url
+            
         except Exception as e:
-            print(f"Error S3 (usando local): {e}")
+            print(f"   ❌ Error al subir a S3: {str(e)}")
+            print(f"   📁 Guardando localmente como fallback...")
+            flash(f'Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
+    else:
+        print(f"   ⚠️  Credenciales S3 incompletas. Guardando localmente...")
     
     # Fallback Local
+    archivo.seek(0)  # Reiniciar puntero
     archivo.save(os.path.join(UPLOAD_FOLDER, filename))
+    print(f"   💾 Archivo guardado localmente: {filename}")
     return filename
 
 # --- RUTAS PRINCIPALES ---

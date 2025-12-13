@@ -304,25 +304,25 @@ def gestionar_alumnos():
     if 'user' not in session or session.get('tipo_usuario') != 'profesor':
         return redirect(url_for('login'))
     
-    # 1. Obtener el filtro si existe (Ej: ?grado=6A)
-    filtro_grado = request.args.get('grado')
+    # 1. Capturar filtro
+    filtro = request.args.get('grado') # Ej: '6A'
     
-    query = UsuarioAlumno.query
+    # 2. Lógica de filtrado
+    if filtro and filtro != 'Todos':
+        alumnos = UsuarioAlumno.query.filter_by(grado_grupo=filtro).order_by(UsuarioAlumno.nombre_completo).all()
+    else:
+        alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
     
-    # Si hay filtro, aplicarlo
-    if filtro_grado and filtro_grado != 'Todos':
-        query = query.filter_by(grado_grupo=filtro_grado)
-    
-    # Ordenar y ejecutar
-    alumnos = query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
-    
-    # Estadísticas básicas
+    # 3. Estadísticas (ESTO FALTABA)
     total_alumnos = UsuarioAlumno.query.count()
+    alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count() # <--- Recuperamos esto
     
+    # 4. Enviar todo a la plantilla
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
-                         filtro_actual=filtro_grado)
+                         alumnos_activos=alumnos_activos, # <--- Se lo enviamos al HTML
+                         filtro_actual=filtro)
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 def agregar_alumno():

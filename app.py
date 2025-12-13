@@ -2,7 +2,7 @@ import os
 import boto3
 import qrcode
 import io  # Para manejar archivos en memoria
-from datetime import datetime
+from datetime import datetime, timedelta  # Añadido timedelta aquí
 from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
@@ -11,6 +11,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # --- CONFIGURACIÓN INICIAL ---
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_desarrollo'  # Cambiar en producción
+
+# NUEVO: La sesión expira tras 10 minutos de inactividad
+app.permanent_session_lifetime = timedelta(minutes=10)
 
 # --- CONFIGURACIÓN DE BASE DE DATOS ---
 
@@ -206,6 +209,7 @@ def login():
         # USUARIO Y CONTRASEÑA "QUEMADOS" PARA USO LOCAL (SIMPLE)
         # Puedes cambiar 'admin' y 'profesor123' por lo que quieras
         if username == 'admin' and password == 'profesor123':
+            session.permanent = True  # <--- LÍNEA AGREGADA
             session['user'] = username
             session['tipo_usuario'] = 'profesor'
             flash('¡Bienvenido, Profesor!', 'success')
@@ -239,6 +243,7 @@ def login_alumnos():
         
         if alumno and check_password_hash(alumno.password_hash, password):
             # Guardar datos en sesión
+            session.permanent = True  # <--- LÍNEA AGREGADA
             session['alumno_id'] = alumno.id
             session['alumno_nombre'] = alumno.nombre_completo
             session['alumno_grado'] = alumno.grado_grupo

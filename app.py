@@ -1369,7 +1369,7 @@ def gestionar_entregas():
     # 4. Ordenamos: Primero las más recientes
     entregas = query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
     
-    return render_template('admin/entregas.html', 
+    return render_template('admin/entregas_alumnos.html', 
                          entregas=entregas, 
                          filtro_actual=filtro)
 

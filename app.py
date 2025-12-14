@@ -3,7 +3,7 @@ import boto3
 import qrcode
 import io  # Para manejar archivos en memoria
 from datetime import datetime, timedelta, date  # Añadido timedelta aquí
-from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -163,6 +163,21 @@ class Plataforma(db.Model):
     nombre = db.Column(db.String(50))
     url = db.Column(db.String(500))
     icono = db.Column(db.String(50)) # Guardaremos la clase de FontAwesome (ej: 'fa-code')
+
+# --- MODELOS PARA EL CHAT ---
+
+class Mensaje(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
+    nombre_alumno = db.Column(db.String(100)) # Guardamos el nombre para no hacer tantas consultas
+    grado_grupo = db.Column(db.String(20))    # Para filtrar: "6A" solo lee "6A"
+    contenido = db.Column(db.Text)
+    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Configuracion(db.Model):
+    # Una tabla simple para guardar ajustes globales (como el switch del chat)
+    clave = db.Column(db.String(50), primary_key=True) # Ej: "chat_activo"
+    valor = db.Column(db.String(50)) # Ej: "True" o "False"
 
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 
@@ -502,11 +517,98 @@ def admin_dashboard():
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     total_entregas = EntregaAlumno.query.count()
     
+    # Verificar estado del chat
+    config = Configuracion.query.get('chat_activo')
+    chat_activo = True if not config or config.valor == 'True' else False
+    
     return render_template('admin/dashboard.html', 
                          total_equipos=equipos, 
                          reparaciones=pendientes,
                          alumnos_activos=alumnos_activos,
-                         total_entregas=total_entregas)
+                         total_entregas=total_entregas,
+                         chat_activo=chat_activo)
+
+# --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
+
+# 1. INTERRUPTOR DEL PROFE
+@app.route('/admin/chat/toggle')
+def toggle_chat():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Buscar la configuración, si no existe la creamos
+    config = Configuracion.query.get('chat_activo')
+    if not config:
+        config = Configuracion(clave='chat_activo', valor='True')
+        db.session.add(config)
+    
+    # Invertir el valor (Si es True pasa a False y viceversa)
+    if config.valor == 'True':
+        config.valor = 'False'
+        flash('Chat desactivado para todos los alumnos.', 'secondary')
+    else:
+        config.valor = 'True'
+        flash('Chat activado. Los alumnos pueden conversar.', 'success')
+    
+    db.session.commit()
+    return redirect(url_for('admin_dashboard'))
+
+# 2. ENVIAR MENSAJE (ALUMNO)
+@app.route('/api/chat/enviar', methods=['POST'])
+def enviar_mensaje():
+    if 'alumno_id' not in session:
+        return {'status': 'error', 'msg': 'No logueado'}, 403
+    
+    # Verificar si el chat está activo
+    config = Configuracion.query.get('chat_activo')
+    if config and config.valor == 'False':
+        return {'status': 'error', 'msg': 'Chat desactivado por el profesor'}, 403
+
+    contenido = request.form.get('mensaje')
+    if not contenido or contenido.strip() == '':
+        return {'status': 'error', 'msg': 'Mensaje vacío'}, 400
+
+    # Guardar mensaje
+    nuevo = Mensaje(
+        alumno_id=session['alumno_id'],
+        nombre_alumno=session['alumno_nombre'],
+        grado_grupo=session['alumno_grado'], # Ej: "6A"
+        contenido=contenido
+    )
+    db.session.add(nuevo)
+    db.session.commit()
+    
+    return {'status': 'ok'}
+
+# 3. LEER MENSAJES (ALUMNO)
+@app.route('/api/chat/obtener')
+def obtener_mensajes():
+    if 'alumno_id' not in session:
+        return {'status': 'error'}, 403
+
+    # Obtener mensajes SOLO de mi grupo (últimos 50)
+    mi_grupo = session['alumno_grado']
+    mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo).order_by(Mensaje.fecha.asc()).all()
+    
+    # Verificar estado del chat
+    config = Configuracion.query.get('chat_activo')
+    chat_activo = True if not config or config.valor == 'True' else False
+
+    # Convertir a JSON para que Javascript lo entienda
+    lista_mensajes = []
+    for m in mensajes:
+        es_mio = (m.alumno_id == session['alumno_id'])
+        lista_mensajes.append({
+            'nombre': 'Yo' if es_mio else m.nombre_alumno,
+            'texto': m.contenido,
+            'es_mio': es_mio,
+            'hora': m.fecha.strftime('%H:%M')
+        })
+
+    return {
+        'mensajes': lista_mensajes,
+        'activo': chat_activo
+    }
 
 # --- RUTAS DE GESTIÓN DE ALUMNOS Y ASISTENCIA ---
 

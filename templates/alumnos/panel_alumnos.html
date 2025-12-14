@@ -350,15 +350,45 @@
                         </div>
                     </div>
 
-                    <div class="card-footer bg-white">
-                        <form id="formChat" class="d-flex gap-2" onsubmit="enviarMensaje(event)">
-                            <input type="text" id="inputMensaje" class="form-control" placeholder="Escribe algo..." autocomplete="off">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-paper-plane"></i>
-                            </button>
+                    <div class="card-footer bg-white position-relative">
+                        
+                        <div class="emoji-picker" id="emojiMenu" style="display: none; position: absolute; bottom: 100%; left: 10px; background: white; border: 1px solid #ccc; padding: 10px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 9999; width: 260px; grid-template-columns: repeat(6, 1fr); gap: 5px;">
+                            <div class="emoji-btn" onclick="addEmoji('😀')" style="cursor:pointer; padding:5px;">😀</div>
+                            <div class="emoji-btn" onclick="addEmoji('😂')" style="cursor:pointer; padding:5px;">😂</div>
+                            <div class="emoji-btn" onclick="addEmoji('😍')" style="cursor:pointer; padding:5px;">😍</div>
+                            <div class="emoji-btn" onclick="addEmoji('😎')" style="cursor:pointer; padding:5px;">😎</div>
+                            <div class="emoji-btn" onclick="addEmoji('😭')" style="cursor:pointer; padding:5px;">😭</div>
+                            <div class="emoji-btn" onclick="addEmoji('😡')" style="cursor:pointer; padding:5px;">😡</div>
+                            <div class="emoji-btn" onclick="addEmoji('👍')" style="cursor:pointer; padding:5px;">👍</div>
+                            <div class="emoji-btn" onclick="addEmoji('👎')" style="cursor:pointer; padding:5px;">👎</div>
+                            <div class="emoji-btn" onclick="addEmoji('👋')" style="cursor:pointer; padding:5px;">👋</div>
+                            <div class="emoji-btn" onclick="addEmoji('🙌')" style="cursor:pointer; padding:5px;">🙌</div>
+                            <div class="emoji-btn" onclick="addEmoji('🔥')" style="cursor:pointer; padding:5px;">🔥</div>
+                            <div class="emoji-btn" onclick="addEmoji('✨')" style="cursor:pointer; padding:5px;">✨</div>
+                            <div class="emoji-btn" onclick="addEmoji('🤔')" style="cursor:pointer; padding:5px;">🤔</div>
+                            <div class="emoji-btn" onclick="addEmoji('😱')" style="cursor:pointer; padding:5px;">😱</div>
+                            <div class="emoji-btn" onclick="addEmoji('🎉')" style="cursor:pointer; padding:5px;">🎉</div>
+                            <div class="emoji-btn" onclick="addEmoji('💻')" style="cursor:pointer; padding:5px;">💻</div>
+                            <div class="emoji-btn" onclick="addEmoji('🤖')" style="cursor:pointer; padding:5px;">🤖</div>
+                            <div class="emoji-btn" onclick="addEmoji('💯')" style="cursor:pointer; padding:5px;">💯</div>
+                        </div>
+
+                        <form id="formChat" onsubmit="enviarMensaje(event)">
+                            <div class="input-group">
+                                <button type="button" class="btn btn-light border" onclick="toggleEmojiMenu()" style="font-size: 1.2rem; line-height: 1;">
+                                    😀
+                                </button>
+                                
+                                <input type="text" id="inputMensaje" class="form-control" placeholder="Escribe algo..." autocomplete="off">
+                                
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
                         </form>
+
                         <div id="avisoBloqueo" class="alert alert-warning mb-0 mt-2 text-center" style="display: none;">
-                            <small><i class="fas fa-lock"></i> El profesor ha desactivado el chat temporalmente.</small>
+                            <small><i class="fas fa-lock"></i> Chat desactivado por el profesor.</small>
                         </div>
                     </div>
                 </div>
@@ -460,6 +490,29 @@
             actualizarChat();
             setTimeout(scrollAlFondo, 200);
         }
+
+        // Función para mostrar/ocultar el menú de emojis
+        function toggleEmojiMenu() {
+            const menu = document.getElementById('emojiMenu');
+            menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
+        }
+
+        // Función para agregar un emoji al input
+        function addEmoji(emoji) {
+            const input = document.getElementById('inputMensaje');
+            input.value += emoji;
+            input.focus();
+            document.getElementById('emojiMenu').style.display = 'none';
+        }
+
+        // Cerrar menú de emojis al hacer clic fuera
+        document.addEventListener('click', function(event) {
+            const menu = document.getElementById('emojiMenu');
+            const button = document.querySelector('button[onclick="toggleEmojiMenu()"]');
+            if (menu && !menu.contains(event.target) && !button.contains(event.target)) {
+                menu.style.display = 'none';
+            }
+        });
 
         // Iniciar el ciclo de actualización (Cada 3 segundos)
         setInterval(actualizarChat, 3000);

@@ -119,6 +119,19 @@ class Asistencia(db.Model):
     # Relación para saber de quién es la asistencia
     alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True))
 
+# --- MODELO PARA REGISTRO DE REPORTES GENERADOS ---
+class ReporteAsistencia(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    grupo = db.Column(db.String(20), nullable=False)  # Ej: "6A"
+    fecha_inicio = db.Column(db.Date, nullable=False)
+    fecha_fin = db.Column(db.Date, nullable=True)  # Puede ser None si es solo un día
+    fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
+    archivo_url = db.Column(db.String(500))  # URL de S3 o ruta local
+    nombre_archivo = db.Column(db.String(200))
+    generado_por = db.Column(db.String(100))  # Username del profesor
+    total_alumnos = db.Column(db.Integer, default=0)
+    total_registros = db.Column(db.Integer, default=0)
+
 # --- MODELO PARA ACTIVIDADES POR GRADO ---
 class ActividadGrado(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -366,6 +379,25 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         f.write(buffer.getvalue())
     
     print(f"💾 PDF guardado localmente como respaldo")
+    
+    # 🆕 REGISTRAR EL REPORTE EN LA BASE DE DATOS
+    try:
+        nuevo_reporte = ReporteAsistencia(
+            grupo=grupo,
+            fecha_inicio=fecha_inicio_obj,
+            fecha_fin=datetime.strptime(fecha_fin, '%Y-%m-%d').date() if fecha_fin else None,
+            archivo_url=file_url or f"reportes/{filename}",
+            nombre_archivo=filename,
+            generado_por=session.get('user', 'Sistema'),
+            total_alumnos=total_alumnos,
+            total_registros=total_registros
+        )
+        db.session.add(nuevo_reporte)
+        db.session.commit()
+        print(f"📝 Reporte registrado en base de datos")
+    except Exception as e:
+        print(f"⚠️ Error al registrar reporte en BD: {str(e)}")
+        # No afecta la generación del PDF
     
     # 🔥 IMPORTANTE: Devolver el buffer para descarga inmediata
     buffer.seek(0)  # Resetear el puntero al inicio
@@ -683,6 +715,144 @@ def calificar_entrega(id):
     
     flash(f'Entrega de {entrega.nombre_alumno} calificada con {entrega.estrellas} estrellas.', 'success')
     return redirect(url_for('ver_entregas_alumnos'))
+
+# --- RUTAS PARA VER REPORTES GENERADOS ---
+
+@app.route('/admin/reportes-asistencia')
+def ver_reportes_asistencia():
+    """Página para ver todos los reportes generados con filtros"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Obtener filtros
+    filtro_grupo = request.args.get('grupo', 'Todos')
+    filtro_mes = request.args.get('mes', '')
+    filtro_anio = request.args.get('anio', '')
+    
+    # Query base
+    query = ReporteAsistencia.query
+    
+    # Aplicar filtro de grupo
+    if filtro_grupo and filtro_grupo != 'Todos':
+        query = query.filter_by(grupo=filtro_grupo)
+    
+    # Aplicar filtro de mes/año
+    if filtro_mes and filtro_anio:
+        try:
+            mes = int(filtro_mes)
+            anio = int(filtro_anio)
+            # Filtrar reportes del mes seleccionado
+            primer_dia = date(anio, mes, 1)
+            if mes == 12:
+                ultimo_dia = date(anio + 1, 1, 1) - timedelta(days=1)
+            else:
+                ultimo_dia = date(anio, mes + 1, 1) - timedelta(days=1)
+            
+            query = query.filter(
+                ReporteAsistencia.fecha_inicio >= primer_dia,
+                ReporteAsistencia.fecha_inicio <= ultimo_dia
+            )
+        except:
+            pass
+    
+    # Ordenar por fecha de generación (más reciente primero)
+    reportes = query.order_by(ReporteAsistencia.fecha_generacion.desc()).all()
+    
+    # Obtener lista de grupos únicos para el filtro
+    grupos_disponibles = db.session.query(ReporteAsistencia.grupo).distinct().all()
+    grupos_disponibles = [g[0] for g in grupos_disponibles]
+    
+    # Estadísticas
+    total_reportes = ReporteAsistencia.query.count()
+    reportes_este_mes = ReporteAsistencia.query.filter(
+        ReporteAsistencia.fecha_generacion >= date.today().replace(day=1)
+    ).count()
+    
+    return render_template('admin/reportes_asistencia.html',
+                         reportes=reportes,
+                         grupos_disponibles=grupos_disponibles,
+                         filtro_grupo=filtro_grupo,
+                         filtro_mes=filtro_mes,
+                         filtro_anio=filtro_anio,
+                         total_reportes=total_reportes,
+                         reportes_este_mes=reportes_este_mes,
+                         fecha_hoy=date.today().isoformat())
+
+@app.route('/admin/descargar-reporte/<int:reporte_id>')
+def descargar_reporte_guardado(reporte_id):
+    """Descargar un reporte previamente generado"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    reporte = ReporteAsistencia.query.get_or_404(reporte_id)
+    
+    try:
+        # Si está en S3
+        if reporte.archivo_url and reporte.archivo_url.startswith('http'):
+            if S3_ENDPOINT and S3_KEY and S3_SECRET:
+                s3 = boto3.client('s3',
+                                endpoint_url=S3_ENDPOINT,
+                                aws_access_key_id=S3_KEY,
+                                aws_secret_access_key=S3_SECRET,
+                                region_name='us-west-1')
+                
+                # Extraer el key del archivo
+                key = f"reportes/{reporte.nombre_archivo}"
+                
+                # Descargar desde S3
+                s3_object = s3.get_object(Bucket=S3_BUCKET, Key=key)
+                pdf_content = s3_object['Body'].read()
+                
+                return send_file(
+                    BytesIO(pdf_content),
+                    mimetype='application/pdf',
+                    as_attachment=True,
+                    download_name=reporte.nombre_archivo
+                )
+        
+        # Si está guardado localmente
+        return send_from_directory(
+            os.path.join(UPLOAD_FOLDER, 'reportes'),
+            reporte.nombre_archivo,
+            as_attachment=True
+        )
+        
+    except Exception as e:
+        flash(f'Error al descargar reporte: {str(e)}', 'danger')
+        return redirect(url_for('ver_reportes_asistencia'))
+
+@app.route('/admin/eliminar-reporte/<int:reporte_id>')
+def eliminar_reporte(reporte_id):
+    """Eliminar un reporte del registro (no borra el archivo físico)"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    reporte = ReporteAsistencia.query.get_or_404(reporte_id)
+    
+    try:
+        # Opcionalmente eliminar de S3
+        if reporte.archivo_url and reporte.archivo_url.startswith('http') and S3_ENDPOINT and S3_KEY and S3_SECRET:
+            try:
+                s3 = boto3.client('s3',
+                                endpoint_url=S3_ENDPOINT,
+                                aws_access_key_id=S3_KEY,
+                                aws_secret_access_key=S3_SECRET,
+                                region_name='us-west-1')
+                key = f"reportes/{reporte.nombre_archivo}"
+                s3.delete_object(Bucket=S3_BUCKET, Key=key)
+                print(f"🗑️ Archivo eliminado de S3: {key}")
+            except Exception as e:
+                print(f"⚠️ No se pudo eliminar de S3: {e}")
+        
+        # Eliminar registro de la base de datos
+        db.session.delete(reporte)
+        db.session.commit()
+        flash('Reporte eliminado correctamente', 'success')
+        
+    except Exception as e:
+        flash(f'Error al eliminar reporte: {str(e)}', 'danger')
+    
+    return redirect(url_for('ver_reportes_asistencia'))
 
 # --- RUTAS DE ALUMNOS (PANEL Y SUBIDA DE TAREAS) ---
 

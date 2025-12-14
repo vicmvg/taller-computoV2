@@ -1348,6 +1348,31 @@ def eliminar_plataforma(id):
     flash('Plataforma eliminada.', 'warning')
     return redirect(url_for('gestionar_plataformas'))
 
+# --- GESTIÓN DE ENTREGAS (CON FILTRO) ---
+
+@app.route('/admin/entregas')
+def gestionar_entregas():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # 1. Capturamos el filtro de la URL (Ej: ?grado=6A)
+    filtro = request.args.get('grado')
+    
+    # 2. Iniciamos la consulta uniendo Entregas con Alumnos
+    # (Necesitamos 'join' para saber el grado del alumno que mandó la tarea)
+    query = EntregaAlumno.query.join(UsuarioAlumno)
+    
+    # 3. Aplicamos el filtro si existe
+    if filtro and filtro != 'Todos':
+        query = query.filter(UsuarioAlumno.grado_grupo == filtro)
+    
+    # 4. Ordenamos: Primero las más recientes
+    entregas = query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
+    
+    return render_template('admin/entregas.html', 
+                         entregas=entregas, 
+                         filtro_actual=filtro)
+
 # --- RUTA PARA SERVIR ARCHIVOS LOCALES (IMPORTANTE) ---
 # Esta ruta permite ver las imágenes si están guardadas en tu PC
 @app.route('/uploads/<filename>')

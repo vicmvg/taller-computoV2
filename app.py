@@ -21,6 +21,9 @@ from io import BytesIO
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_desarrollo'  # Cambiar en producción
 
+# PALABRA MAESTRA PARA RECUPERAR CONTRASEÑA 
+TOKEN_MAESTRO = "treceT1gres"
+
 # NUEVO: La sesión expira tras 10 minutos de inactividad
 app.permanent_session_lifetime = timedelta(minutes=10)
 
@@ -438,29 +441,72 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # Si ya está logueado, mandar al dashboard
+    if 'user' in session and session.get('tipo_usuario') == 'profesor':
+        return redirect(url_for('admin_dashboard'))
+
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
         
-        # USUARIO Y CONTRASEÑA "QUEMADOS" PARA USO LOCAL (SIMPLE)
-        # Puedes cambiar 'admin' y 'profesor123' por lo que quieras
-        if username == 'admin' and password == 'profesor123':
-            session.permanent = True  # <--- LÍNEA AGREGADA
-            session['user'] = username
-            session['tipo_usuario'] = 'profesor'
-            flash('¡Bienvenido, Profesor!', 'success')
-            return redirect(url_for('admin_dashboard'))
-        else:
-            flash('Credenciales incorrectas', 'danger')
-            return redirect(url_for('login'))
+        # Solo permitimos el usuario 'admin'
+        if username == 'admin':
+            # 1. Buscamos si hay una contraseña guardada en la Base de Datos
+            config_pass = Configuracion.query.get('admin_password')
             
-    return render_template('admin/login.html')
+            # 2. Si existe, verificamos el hash. Si no existe, usamos la default 'profesor123'
+            if config_pass:
+                es_valida = check_password_hash(config_pass.valor, password)
+            else:
+                # Caso inicial (antes de que la cambies por primera vez)
+                es_valida = (password == 'profesor123')
+
+            if es_valida:
+                session.permanent = True
+                session['user'] = username
+                session['tipo_usuario'] = 'profesor'
+                flash('¡Bienvenido, Profesor!', 'success')
+                return redirect(url_for('admin_dashboard'))
+            else:
+                flash('Contraseña incorrecta.', 'danger')
+        else:
+            flash('Usuario incorrecto.', 'danger')
+            
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
     session.clear()
     flash('Sesión cerrada correctamente.')
     return redirect(url_for('index'))
+
+# --- RECUPERAR CONTRASEÑA (PROFESOR) ---
+@app.route('/recuperar-acceso', methods=['GET', 'POST'])
+def recuperar_acceso():
+    if request.method == 'POST':
+        usuario = request.form['usuario']
+        token = request.form['token']
+        nueva_pass = request.form['nueva_pass']
+        
+        # 1. Verificar Usuario y Token Maestro
+        if usuario == 'admin' and token == TOKEN_MAESTRO:
+            # 2. Guardar la nueva contraseña en la BD (Tabla Configuracion)
+            hash_pass = generate_password_hash(nueva_pass)
+            
+            config = Configuracion.query.get('admin_password')
+            if not config:
+                config = Configuracion(clave='admin_password', valor=hash_pass)
+                db.session.add(config)
+            else:
+                config.valor = hash_pass
+            
+            db.session.commit()
+            flash('¡Contraseña restablecida con éxito! Inicia sesión ahora.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash('Token maestro incorrecto o usuario no válido.', 'danger')
+            
+    return render_template('recuperar.html')
 
 # --- RUTAS DE ALUMNOS (LOGIN CON USUARIO/CONTRASEÑA) ---
 

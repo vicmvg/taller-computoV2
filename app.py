@@ -182,6 +182,14 @@ class Configuracion(db.Model):
     clave = db.Column(db.String(50), primary_key=True) # Ej: "chat_activo"
     valor = db.Column(db.String(200)) # Ej: "True" o "False"
 
+# --- MODELO DE RECURSOS ---
+class Recurso(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    titulo = db.Column(db.String(100), nullable=False)
+    archivo_url = db.Column(db.String(300), nullable=False) # Guardará el nombre en S3 o Local
+    tipo_archivo = db.Column(db.String(10)) # 'PDF', 'WORD', 'OTRO'
+    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 
 def guardar_archivo(archivo):
@@ -434,8 +442,11 @@ def index():
     
     # 3. Obtener Plataformas
     plataformas = Plataforma.query.all()
+    
+    # 4. NUEVO: Obtener Recursos
+    recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
 
-    return render_template('index.html', anuncios=anuncios, horarios=horarios, plataformas=plataformas)
+    return render_template('index.html', anuncios=anuncios, horarios=horarios, plataformas=plataformas, recursos=recursos)
 
 # --- RUTAS DE AUTENTICACIÓN (LOGIN PROFESOR) ---
 
@@ -1418,6 +1429,62 @@ def gestionar_entregas():
     return render_template('admin/entregas_alumnos.html', 
                          entregas=entregas, 
                          filtro_actual=filtro)
+
+# --- GESTIÓN DE RECURSOS (ADMIN) ---
+
+@app.route('/admin/recursos')
+def gestionar_recursos():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Ordenamos: lo más nuevo primero
+    recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
+    return render_template('admin/recursos.html', recursos=recursos)
+
+@app.route('/admin/recursos/subir', methods=['POST'])
+def subir_recurso():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    archivo = request.files.get('archivo')
+    titulo = request.form.get('titulo')
+
+    if archivo and titulo:
+        try:
+            # 1. Usamos tu función existente para guardar en S3 o Local
+            ruta_archivo = guardar_archivo(archivo)
+            
+            # 2. Detectar tipo de archivo para el icono
+            ext = archivo.filename.split('.')[-1].lower()
+            if ext == 'pdf':
+                tipo = 'PDF'
+            elif ext in ['doc', 'docx']:
+                tipo = 'WORD'
+            else:
+                tipo = 'OTRO'
+
+            # 3. Guardar en Base de Datos
+            nuevo = Recurso(titulo=titulo, archivo_url=ruta_archivo, tipo_archivo=tipo)
+            db.session.add(nuevo)
+            db.session.commit()
+            
+            flash('Recurso publicado correctamente.', 'success')
+        except Exception as e:
+            flash(f'Error al subir: {e}', 'danger')
+            
+    return redirect(url_for('gestionar_recursos'))
+
+@app.route('/admin/recursos/eliminar/<int:id>')
+def eliminar_recurso(id):
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    recurso = Recurso.query.get_or_404(id)
+    # Borramos de la base de datos (el archivo se queda en S3/Local por seguridad)
+    db.session.delete(recurso)
+    db.session.commit()
+    flash('Recurso eliminado de la lista.', 'warning')
+    return redirect(url_for('gestionar_recursos'))
 
 # --- RUTA PARA SERVIR ARCHIVOS LOCALES (IMPORTANTE) ---
 # Esta ruta permite ver las imágenes si están guardadas en tu PC

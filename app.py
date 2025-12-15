@@ -1343,7 +1343,7 @@ def gestionar_banco():
     
     # Ordenar por fecha de creación
     banco = BancoCuestionario.query.order_by(BancoCuestionario.fecha_creacion.desc()).all()
-    return render_template('admin/banco_cuestionarios.html', banco=banco)
+    return render_template('admin/Banco_cuestionarios.html', banco=banco)
 
 @app.route('/admin/banco/agregar', methods=['POST'])
 def agregar_al_banco():

@@ -59,6 +59,15 @@
         .border-purple {
             border-color: #8b5cf6 !important;
         }
+        .btn-outline-purple {
+            color: #8b5cf6;
+            border-color: #8b5cf6;
+        }
+        .btn-outline-purple:hover {
+            color: white;
+            background-color: #8b5cf6;
+            border-color: #8b5cf6;
+        }
         .group-hover:hover {
             transform: translateY(-2px);
             transition: transform 0.2s ease;
@@ -102,6 +111,11 @@
                         <li class="nav-item">
                             <a class="nav-link" href="#misiones">
                                 <i class="fas fa-clipboard-check"></i> Misiones
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#chat">
+                                <i class="fas fa-comments"></i> Chat
                             </a>
                         </li>
                         <li class="nav-item">
@@ -250,16 +264,11 @@
                                         <td>
                                             <div class="d-flex align-items-center">
                                                 <i class="bi bi-file-earmark me-2"></i>
-                                                {% if entrega.archivo_url.startswith('http') %}
-                                                    <a href="{{ entrega.archivo_url }}" target="_blank" class="text-decoration-none">
-                                                        Ver archivo
-                                                    </a>
-                                                {% else %}
-                                                    <a href="{{ url_for('uploaded_file', filename=entrega.archivo_url) }}" 
-                                                       target="_blank" class="text-decoration-none">
-                                                        Ver archivo
-                                                    </a>
-                                                {% endif %}
+                                                <!-- ACTUALIZADO: Usar nueva ruta ver_archivo -->
+                                                <a href="{{ url_for('ver_archivo', archivo_path=entrega.archivo_url) }}" 
+                                                   target="_blank" class="text-decoration-none">
+                                                    Ver mi archivo
+                                                </a>
                                             </div>
                                         </td>
                                         <td>
@@ -322,10 +331,187 @@
                         {% endif %}
                     </div>
                 </div>
+
+                <!-- Chat Section -->
+                <div class="card shadow-sm" id="chat" style="height: 500px;">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-comments me-2"></i>Chat de {{ session.alumno_grado }}</h5>
+                        <span class="badge bg-light text-primary" id="statusChat">Conectado</span>
+                    </div>
+                    
+                    <div class="card-body p-3 overflow-auto" id="cajaMensajes" style="background: #f8f9fa;">
+                        <div class="text-center text-muted mt-5">
+                            <i class="fas fa-circle-notch fa-spin"></i> Cargando chat...
+                        </div>
+                    </div>
+
+                    <div class="card-footer bg-white position-relative">
+                        
+                        <div class="emoji-picker" id="emojiMenu" style="display: none; position: absolute; bottom: 100%; left: 10px; background: white; border: 1px solid #ccc; padding: 10px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 9999; width: 260px; grid-template-columns: repeat(6, 1fr); gap: 5px;">
+                            <div class="emoji-btn" onclick="addEmoji('😀')" style="cursor:pointer; padding:5px;">😀</div>
+                            <div class="emoji-btn" onclick="addEmoji('😂')" style="cursor:pointer; padding:5px;">😂</div>
+                            <div class="emoji-btn" onclick="addEmoji('😍')" style="cursor:pointer; padding:5px;">😍</div>
+                            <div class="emoji-btn" onclick="addEmoji('😎')" style="cursor:pointer; padding:5px;">😎</div>
+                            <div class="emoji-btn" onclick="addEmoji('😭')" style="cursor:pointer; padding:5px;">😭</div>
+                            <div class="emoji-btn" onclick="addEmoji('😡')" style="cursor:pointer; padding:5px;">😡</div>
+                            <div class="emoji-btn" onclick="addEmoji('👍')" style="cursor:pointer; padding:5px;">👍</div>
+                            <div class="emoji-btn" onclick="addEmoji('👎')" style="cursor:pointer; padding:5px;">👎</div>
+                            <div class="emoji-btn" onclick="addEmoji('👋')" style="cursor:pointer; padding:5px;">👋</div>
+                            <div class="emoji-btn" onclick="addEmoji('🙌')" style="cursor:pointer; padding:5px;">🙌</div>
+                            <div class="emoji-btn" onclick="addEmoji('🔥')" style="cursor:pointer; padding:5px;">🔥</div>
+                            <div class="emoji-btn" onclick="addEmoji('✨')" style="cursor:pointer; padding:5px;">✨</div>
+                            <div class="emoji-btn" onclick="addEmoji('🤔')" style="cursor:pointer; padding:5px;">🤔</div>
+                            <div class="emoji-btn" onclick="addEmoji('😱')" style="cursor:pointer; padding:5px;">😱</div>
+                            <div class="emoji-btn" onclick="addEmoji('🎉')" style="cursor:pointer; padding:5px;">🎉</div>
+                            <div class="emoji-btn" onclick="addEmoji('💻')" style="cursor:pointer; padding:5px;">💻</div>
+                            <div class="emoji-btn" onclick="addEmoji('🤖')" style="cursor:pointer; padding:5px;">🤖</div>
+                            <div class="emoji-btn" onclick="addEmoji('💯')" style="cursor:pointer; padding:5px;">💯</div>
+                        </div>
+
+                        <form id="formChat" onsubmit="enviarMensaje(event)">
+                            <div class="input-group">
+                                <button type="button" class="btn btn-light border" onclick="toggleEmojiMenu()" style="font-size: 1.2rem; line-height: 1;">
+                                    😀
+                                </button>
+                                
+                                <input type="text" id="inputMensaje" class="form-control" placeholder="Escribe algo..." autocomplete="off">
+                                
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </form>
+
+                        <div id="avisoBloqueo" class="alert alert-warning mb-0 mt-2 text-center" style="display: none;">
+                            <small><i class="fas fa-lock"></i> Chat desactivado por el profesor.</small>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        let chatBloqueado = false;
+
+        // Función para bajar el scroll automáticamente
+        function scrollAlFondo() {
+            const caja = document.getElementById('cajaMensajes');
+            caja.scrollTop = caja.scrollHeight;
+        }
+
+        // 1. CARGAR MENSAJES
+        async function actualizarChat() {
+            try {
+                const respuesta = await fetch('/api/chat/obtener');
+                const datos = await respuesta.json();
+                
+                const caja = document.getElementById('cajaMensajes');
+                const input = document.getElementById('inputMensaje');
+                const aviso = document.getElementById('avisoBloqueo');
+                
+                // Manejo del bloqueo
+                if (!datos.activo) {
+                    input.disabled = true;
+                    input.placeholder = "Chat desactivado";
+                    aviso.style.display = 'block';
+                    chatBloqueado = true;
+                } else {
+                    input.disabled = false;
+                    input.placeholder = "Escribe algo...";
+                    aviso.style.display = 'none';
+                    chatBloqueado = false;
+                }
+
+                // Dibujar mensajes
+                let html = '';
+                if(datos.mensajes.length === 0) {
+                    html = '<div class="text-center text-muted mt-4"><small>Sé el primero en escribir.</small></div>';
+                } else {
+                    datos.mensajes.forEach(msg => {
+                        // Estilo diferente si soy yo o es otro
+                        let clase = msg.es_mio ? 'justify-content-end' : 'justify-content-start';
+                        let color = msg.es_mio ? 'bg-primary text-white' : 'bg-white text-dark border';
+                        
+                        html += `
+                            <div class="d-flex ${clase} mb-2">
+                                <div class="px-3 py-2 rounded-3 shadow-sm ${color}" style="max-width: 75%;">
+                                    <small class="d-block fw-bold opacity-75" style="font-size: 0.7rem;">
+                                        ${msg.nombre}
+                                    </small>
+                                    <span>${msg.texto}</span>
+                                    <small class="d-block text-end opacity-50" style="font-size: 0.6rem;">${msg.hora}</small>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                // Solo actualizamos el HTML si cambió algo (para evitar parpadeos masivos)
+                // En esta versión simple reemplazamos todo, pero guardamos la posición del scroll
+                const estabaAbajo = caja.scrollHeight - caja.scrollTop === caja.clientHeight;
+                caja.innerHTML = html;
+                
+                if(estabaAbajo) scrollAlFondo(); // Solo bajar si el usuario ya estaba abajo
+
+            } catch (error) {
+                console.error("Error cargando chat", error);
+            }
+        }
+
+        // 2. ENVIAR MENSAJE
+        async function enviarMensaje(e) {
+            e.preventDefault(); // Evitar recarga de pagina
+            const input = document.getElementById('inputMensaje');
+            const texto = input.value;
+            
+            if (!texto.trim() || chatBloqueado) return;
+
+            // Limpiar input visualmente rápido
+            input.value = '';
+
+            // Enviar al servidor
+            const formData = new FormData();
+            formData.append('mensaje', texto);
+            
+            await fetch('/api/chat/enviar', {
+                method: 'POST',
+                body: formData
+            });
+            
+            // Actualizar chat inmediatamente
+            actualizarChat();
+            setTimeout(scrollAlFondo, 200);
+        }
+
+        // Función para mostrar/ocultar el menú de emojis
+        function toggleEmojiMenu() {
+            const menu = document.getElementById('emojiMenu');
+            menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
+        }
+
+        // Función para agregar un emoji al input
+        function addEmoji(emoji) {
+            const input = document.getElementById('inputMensaje');
+            input.value += emoji;
+            input.focus();
+            document.getElementById('emojiMenu').style.display = 'none';
+        }
+
+        // Cerrar menú de emojis al hacer clic fuera
+        document.addEventListener('click', function(event) {
+            const menu = document.getElementById('emojiMenu');
+            const button = document.querySelector('button[onclick="toggleEmojiMenu()"]');
+            if (menu && !menu.contains(event.target) && !button.contains(event.target)) {
+                menu.style.display = 'none';
+            }
+        });
+
+        // Iniciar el ciclo de actualización (Cada 3 segundos)
+        setInterval(actualizarChat, 3000);
+        actualizarChat(); // Primera carga
+    </script>
 </body>
 </html>

@@ -6,6 +6,7 @@
     <title>Gestión de Alumnos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .sidebar {
             min-height: 100vh;
@@ -32,6 +33,10 @@
             padding: 3px 10px;
             border-radius: 20px;
             font-size: 0.9em;
+        }
+        .btn-group .btn-check:checked + .btn {
+            transform: scale(1.1);
+            font-weight: bold;
         }
     </style>
 </head>
@@ -61,6 +66,11 @@
                         <li class="nav-item">
                             <a class="nav-link active" href="{{ url_for('gestionar_alumnos') }}">
                                 <i class="bi bi-people"></i> Alumnos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('ver_reportes_asistencia') }}">
+                                <i class="bi bi-file-earmark-pdf"></i> Reportes
                             </a>
                         </li>
                         <li class="nav-item">
@@ -130,103 +140,180 @@
                     </div>
                 </div>
                 
+                <!-- Filtro por Grado -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 class="mb-0">Listado de Alumnos</h4>
+                    
+                    <form action="{{ url_for('gestionar_alumnos') }}" method="GET" class="d-flex">
+                        <select name="grado" class="form-select fw-bold" onchange="this.form.submit()" style="min-width: 200px;">
+                            <option value="Todos">Ver Todos</option>
+                            {% for g in range(1, 7) %}
+                                {% for l in ['A', 'B', 'C'] %}
+                                    <option value="{{ g }}{{ l }}" {% if filtro_actual == (g|string + l) %}selected{% endif %}>
+                                        {{ g }}° {{ l }}
+                                    </option>
+                                {% endfor %}
+                            {% endfor %}
+                        </select>
+                    </form>
+                </div>
+                
                 <!-- Students Table -->
                 <div class="card">
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Usuario</th>
-                                        <th>Nombre Completo</th>
-                                        <th>Grado/Grupo</th>
-                                        <th>Estado</th>
-                                        <th>Fecha Creación</th>
-                                        <th>Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for alumno in alumnos %}
-                                    <tr>
-                                        <td>{{ alumno.id }}</td>
-                                        <td><code>{{ alumno.username }}</code></td>
-                                        <td>{{ alumno.nombre_completo }}</td>
-                                        <td>{{ alumno.grado_grupo }}</td>
-                                        <td>
-                                            {% if alumno.activo %}
-                                            <span class="status-active">Activo</span>
+                        <form action="{{ url_for('tomar_asistencia') }}" method="POST">
+                            <input type="hidden" name="grado_origen" value="{{ filtro_actual }}">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            {% if filtro_actual and filtro_actual != 'Todos' %}
+                                                <th>Grado</th>
+                                                <th>Nombre</th>
+                                                <th class="text-center">Pasar Lista (Hoy)</th>
+                                                <th>Estado</th>
+                                                <th>Acciones</th>
                                             {% else %}
-                                            <span class="status-inactive">Inactivo</span>
+                                                <th>ID</th>
+                                                <th>Usuario</th>
+                                                <th>Nombre Completo</th>
+                                                <th>Grado/Grupo</th>
+                                                <th>Estado</th>
+                                                <th>Fecha Creación</th>
+                                                <th>Acciones</th>
                                             {% endif %}
-                                        </td>
-                                        <td>{{ alumno.fecha_creacion.strftime('%d/%m/%Y') }}</td>
-                                        <td>
-                                            <button class="btn btn-sm btn-warning" 
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#editStudentModal{{ alumno.id }}">
-                                                <i class="bi bi-pencil"></i>
-                                            </button>
-                                            <a href="{{ url_for('eliminar_alumno', id=alumno.id) }}" 
-                                               class="btn btn-sm btn-danger"
-                                               onclick="return confirm('¿Estás seguro de eliminar a {{ alumno.nombre_completo }}?')">
-                                                <i class="bi bi-trash"></i>
-                                            </a>
-                                        </td>
-                                    </tr>
-                                    
-                                    <!-- Edit Modal for each student -->
-                                    <div class="modal fade" id="editStudentModal{{ alumno.id }}" tabindex="-1">
-                                        <div class="modal-dialog">
-                                            <div class="modal-content">
-                                                <div class="modal-header">
-                                                    <h5 class="modal-title">Editar Alumno</h5>
-                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for alumno in alumnos %}
+                                        <tr>
+                                            {% if filtro_actual and filtro_actual != 'Todos' %}
+                                                <td>{{ alumno.grado_grupo }}</td>
+                                                <td>{{ alumno.nombre_completo }}</td>
+                                                <td class="text-center">
+                                                    <div class="btn-group" role="group">
+                                                        <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" id="p_{{ alumno.id }}" value="P" checked>
+                                                        <label class="btn btn-outline-success btn-sm" for="p_{{ alumno.id }}">P</label>
+
+                                                        <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" id="f_{{ alumno.id }}" value="F">
+                                                        <label class="btn btn-outline-danger btn-sm" for="f_{{ alumno.id }}">F</label>
+
+                                                        <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" id="r_{{ alumno.id }}" value="R">
+                                                        <label class="btn btn-outline-warning btn-sm" for="r_{{ alumno.id }}">R</label>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    {% if alumno.activo %}
+                                                    <span class="status-active">Activo</span>
+                                                    {% else %}
+                                                    <span class="status-inactive">Inactivo</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <button type="button" class="btn btn-sm btn-warning" 
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#editStudentModal{{ alumno.id }}">
+                                                        <i class="bi bi-pencil"></i>
+                                                    </button>
+                                                    <a href="{{ url_for('eliminar_alumno', id=alumno.id) }}" 
+                                                       class="btn btn-sm btn-danger"
+                                                       onclick="return confirm('¿Estás seguro de eliminar a {{ alumno.nombre_completo }}?')">
+                                                        <i class="bi bi-trash"></i>
+                                                    </a>
+                                                </td>
+                                            {% else %}
+                                                <td>{{ alumno.id }}</td>
+                                                <td><code>{{ alumno.username }}</code></td>
+                                                <td>{{ alumno.nombre_completo }}</td>
+                                                <td>{{ alumno.grado_grupo }}</td>
+                                                <td>
+                                                    {% if alumno.activo %}
+                                                    <span class="status-active">Activo</span>
+                                                    {% else %}
+                                                    <span class="status-inactive">Inactivo</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ alumno.fecha_creacion.strftime('%d/%m/%Y') }}</td>
+                                                <td>
+                                                    <button type="button" class="btn btn-sm btn-warning" 
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#editStudentModal{{ alumno.id }}">
+                                                        <i class="bi bi-pencil"></i>
+                                                    </button>
+                                                    <a href="{{ url_for('eliminar_alumno', id=alumno.id) }}" 
+                                                       class="btn btn-sm btn-danger"
+                                                       onclick="return confirm('¿Estás seguro de eliminar a {{ alumno.nombre_completo }}?')">
+                                                        <i class="bi bi-trash"></i>
+                                                    </a>
+                                                </td>
+                                            {% endif %}
+                                        </tr>
+                                        
+                                        <!-- Edit Modal for each student -->
+                                        <div class="modal fade" id="editStudentModal{{ alumno.id }}" tabindex="-1">
+                                            <div class="modal-dialog">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title">Editar Alumno</h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                    </div>
+                                                    <form method="POST" action="{{ url_for('editar_alumno', id=alumno.id) }}">
+                                                        <div class="modal-body">
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Usuario</label>
+                                                                <input type="text" class="form-control" 
+                                                                       value="{{ alumno.username }}" disabled>
+                                                                <small class="form-text text-muted">El usuario no se puede cambiar</small>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Nombre Completo</label>
+                                                                <input type="text" class="form-control" name="nombre_completo"
+                                                                       value="{{ alumno.nombre_completo }}" required>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Grado/Grupo</label>
+                                                                <input type="text" class="form-control" name="grado_grupo"
+                                                                       value="{{ alumno.grado_grupo }}" required>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Nueva Contraseña</label>
+                                                                <input type="password" class="form-control" name="password"
+                                                                       placeholder="Dejar en blanco para no cambiar">
+                                                            </div>
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" 
+                                                                       name="activo" id="activo{{ alumno.id }}" 
+                                                                       {% if alumno.activo %}checked{% endif %}>
+                                                                <label class="form-check-label" for="activo{{ alumno.id }}">
+                                                                    Cuenta activa
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                            <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                                                        </div>
+                                                    </form>
                                                 </div>
-                                                <form method="POST" action="{{ url_for('editar_alumno', id=alumno.id) }}">
-                                                    <div class="modal-body">
-                                                        <div class="mb-3">
-                                                            <label class="form-label">Usuario</label>
-                                                            <input type="text" class="form-control" 
-                                                                   value="{{ alumno.username }}" disabled>
-                                                            <small class="form-text text-muted">El usuario no se puede cambiar</small>
-                                                        </div>
-                                                        <div class="mb-3">
-                                                            <label class="form-label">Nombre Completo</label>
-                                                            <input type="text" class="form-control" name="nombre_completo"
-                                                                   value="{{ alumno.nombre_completo }}" required>
-                                                        </div>
-                                                        <div class="mb-3">
-                                                            <label class="form-label">Grado/Grupo</label>
-                                                            <input type="text" class="form-control" name="grado_grupo"
-                                                                   value="{{ alumno.grado_grupo }}" required>
-                                                        </div>
-                                                        <div class="mb-3">
-                                                            <label class="form-label">Nueva Contraseña</label>
-                                                            <input type="password" class="form-control" name="password"
-                                                                   placeholder="Dejar en blanco para no cambiar">
-                                                        </div>
-                                                        <div class="form-check">
-                                                            <input class="form-check-input" type="checkbox" 
-                                                                   name="activo" id="activo{{ alumno.id }}" 
-                                                                   {% if alumno.activo %}checked{% endif %}>
-                                                            <label class="form-check-label" for="activo{{ alumno.id }}">
-                                                                Cuenta activa
-                                                            </label>
-                                                        </div>
-                                                    </div>
-                                                    <div class="modal-footer">
-                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                                                        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
-                                                    </div>
-                                                </form>
                                             </div>
                                         </div>
-                                    </div>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            {% if filtro_actual and filtro_actual != 'Todos' %}
+                            <div class="text-end mt-3">
+                                <a href="{{ url_for('generar_reporte_asistencia', grupo=filtro_actual, fecha_inicio=fecha_hoy) }}" 
+                                   class="btn btn-info me-2" target="_blank">
+                                    <i class="fas fa-file-pdf me-2"></i>Generar Reporte PDF
+                                </a>
+                                <button type="submit" class="btn btn-success fw-bold">
+                                    <i class="fas fa-save me-2"></i>Guardar Asistencia
+                                </button>
+                            </div>
+                            {% endif %}
+                        </form>
                     </div>
                 </div>
             </div>

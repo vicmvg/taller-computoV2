@@ -6,3 +6,4 @@ gunicorn
 qrcode
 pillow
 werkzeug
+reportlab

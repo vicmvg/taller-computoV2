@@ -123,6 +123,58 @@
                 </div>
             </a>
         </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_plataformas') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-gamepad fa-3x text-primary mb-3"></i>
+                    <h6 class="fw-bold text-dark">Sitios Práctica</h6>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_recursos') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-folder-open fa-3x text-success mb-3"></i>
+                    <h6 class="fw-bold text-dark">Subir Recursos</h6>
+                </div>
+            </a>
+        </div>
+        <!-- BOTÓN PARA BANCO DE EXÁMENES -->
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('gestionar_banco') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-archive fa-3x text-info mb-3"></i>
+                    <h6 class="fw-bold text-dark">Banco Exámenes</h6>
+                </div>
+            </a>
+        </div>
+        <!-- BOTÓN PARA ACTIVAR/DESACTIVAR CHAT -->
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('toggle_chat') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift border-warning border-top border-4">
+                    <i class="fas fa-comment-slash fa-3x text-warning mb-3"></i>
+                    <h6 class="fw-bold text-dark">Activar/Desactivar Chat</h6>
+                </div>
+            </a>
+        </div>
+        <!-- BOTÓN PARA CONFIGURAR RUBROS DE BOLETAS -->
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('configurar_boletas') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift">
+                    <i class="fas fa-cog fa-3x text-secondary mb-3"></i>
+                    <h6 class="fw-bold text-dark">Configurar Rubros</h6>
+                </div>
+            </a>
+        </div>
+        <!-- BOTÓN PARA GENERAR BOLETA -->
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('generar_boleta') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
+                    <i class="fas fa-file-contract fa-3x text-primary mb-3"></i>
+                    <h6 class="fw-bold text-dark">Generar Boleta</h6>
+                </div>
+            </a>
+        </div>
     </div>
 </div>
 {% endblock %}

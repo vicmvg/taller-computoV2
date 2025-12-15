@@ -151,46 +151,58 @@
 
         <div id="recursos" class="tab-content-custom">
             <div class="row g-4">
-                <div class="col-md-4">
-                    <div class="resource-card">
-                        <i class="fas fa-file-pdf" style="color: #ef4444;"></i>
-                        <h6>Reglamento del Taller</h6>
-                        <a href="#" class="download-btn">Descargar PDF</a>
+                {% if recursos %}
+                    {% for r in recursos %}
+                    <div class="col-md-4">
+                        <div class="resource-card h-100 p-4 text-center glass-card hover-lift">
+                            <div class="mb-3">
+                                {% if r.tipo_archivo == 'PDF' %}
+                                    <i class="fas fa-file-pdf fa-3x text-danger"></i>
+                                {% elif r.tipo_archivo == 'WORD' %}
+                                    <i class="fas fa-file-word fa-3x text-primary"></i>
+                                {% else %}
+                                    <i class="fas fa-file-alt fa-3x text-success"></i>
+                                {% endif %}
+                            </div>
+                            
+                            <h5 class="fw-bold mb-3">{{ r.titulo }}</h5>
+                            
+                            <!-- ACTUALIZADO: Usar la nueva ruta ver_archivo -->
+                            <a href="{{ url_for('ver_archivo', archivo_path=r.archivo_url) }}" target="_blank" class="btn btn-outline-primary rounded-pill px-4">
+                                Ver / Descargar <i class="fas fa-download ms-2"></i>
+                            </a>
+                            
+                            <p class="text-muted small mt-2">
+                                <i class="fas fa-calendar"></i> 
+                                {{ r.fecha.strftime('%d/%m/%Y') }}
+                            </p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="resource-card">
-                        <i class="fas fa-file-word" style="color: #3b82f6;"></i>
-                        <h6>Manual de Word</h6>
-                        <a href="#" class="download-btn">Descargar Manual</a>
+                    {% endfor %}
+                {% else %}
+                    <div class="col-12 text-center py-5">
+                        <i class="fas fa-folder-open fa-3x text-muted mb-3 opacity-50"></i>
+                        <p class="text-muted">No hay recursos disponibles por el momento.</p>
                     </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="resource-card">
-                        <i class="fas fa-shield-alt" style="color: #10b981;"></i>
-                        <h6>Guía de Seguridad</h6>
-                        <a href="#" class="download-btn">Leer Guía</a>
-                    </div>
-                </div>
+                {% endif %}
             </div>
         </div>
 
         <div id="practica" class="tab-content-custom">
             <div class="glass-card text-center">
                 <h5 style="color: #64748b; margin-bottom: 30px; font-weight: 600;">Plataformas de Práctica</h5>
+                
                 <div class="practice-links">
-                    <a href="https://code.org" target="_blank" class="practice-link">
-                        <i class="fas fa-code"></i>
-                        Code.org
-                    </a>
-                    <a href="#" class="practice-link">
-                        <i class="fas fa-keyboard"></i>
-                        Mecanet
-                    </a>
-                    <a href="https://scratch.mit.edu" target="_blank" class="practice-link">
-                        <i class="fas fa-cube"></i>
-                        Scratch
-                    </a>
+                    {% if plataformas %}
+                        {% for p in plataformas %}
+                        <a href="{{ p.url }}" target="_blank" class="practice-link">
+                            <i class="{{ p.icono }}"></i>
+                            {{ p.nombre }}
+                        </a>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted w-100">No hay enlaces activos.</p>
+                    {% endif %}
                 </div>
             </div>
         </div>

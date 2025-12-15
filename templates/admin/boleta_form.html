@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container py-4">
+    <div class="glass-card mb-4">
+        <h4 class="fw-bold"><i class="fas fa-file-signature me-2"></i>Generar Boleta</h4>
+        
+        <form action="{{ url_for('generar_boleta') }}" method="GET" class="d-flex gap-2 mt-3">
+            <select name="alumno_id" class="form-select w-auto fw-bold" onchange="this.form.submit()">
+                <option value="" disabled selected>Selecciona un alumno...</option>
+                {% for a in alumnos %}
+                <option value="{{ a.id }}" {% if alumno_seleccionado and alumno_seleccionado.id == a.id %}selected{% endif %}>
+                    {{ a.grado_grupo }} - {{ a.nombre_completo }}
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    {% if alumno_seleccionado %}
+    <div class="glass-card border-top border-4 border-primary">
+        <h5 class="fw-bold mb-3">Evaluando a: <span class="text-primary">{{ alumno_seleccionado.nombre_completo }}</span></h5>
+        
+        <form method="POST">
+            <div class="row g-3 mb-4">
+                {% for crit in criterios %}
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold">{{ crit.nombre }} (0-10)</label>
+                    <input type="number" step="0.1" max="10" name="nota_{{ crit.nombre }}" class="form-control" required>
+                </div>
+                {% else %}
+                <div class="alert alert-warning">
+                    No has configurado criterios para {{ alumno_seleccionado.grado_grupo[0] }}° Grado. 
+                    <a href="{{ url_for('configurar_boletas') }}">Configurar ahora</a>.
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="mb-3">
+                <label class="fw-bold">Retroalimentación / Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="4" placeholder="Escribe aquí tus comentarios para el alumno..."></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-success fw-bold px-5">
+                <i class="fas fa-print me-2"></i>Generar Vista de Impresión
+            </button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -2,15 +2,30 @@ import os
 import boto3
 import qrcode
 import io  # Para manejar archivos en memoria
-from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file
+from datetime import datetime, timedelta, date  # Añadido timedelta aquí
+from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# --- NUEVOS IMPORTS PARA GENERAR PDF ---
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from io import BytesIO
+
 # --- CONFIGURACIÓN INICIAL ---
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_desarrollo'  # Cambiar en producción
+
+# PALABRA MAESTRA PARA RECUPERAR CONTRASEÑA 
+TOKEN_MAESTRO = "treceT1gres"
+
+# NUEVO: La sesión expira tras 10 minutos de inactividad
+app.permanent_session_lifetime = timedelta(minutes=10)
 
 # --- CONFIGURACIÓN DE BASE DE DATOS ---
 
@@ -33,11 +48,20 @@ db = SQLAlchemy(app)
 S3_ENDPOINT = os.environ.get('S3_ENDPOINT') 
 S3_KEY = os.environ.get('S3_KEY')
 S3_SECRET = os.environ.get('S3_SECRET')
-S3_BUCKET = 'taller-computo-files' # Nombre de tu bucket futuro
+S3_BUCKET = os.environ.get('S3_BUCKET_NAME', 'taller-computo')
 
 # Carpeta local de respaldo si no hay S3
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Crea la carpeta si no existe
+
+# Debug: Imprimir configuración al iniciar
+print("=" * 50)
+print("CONFIGURACIÓN S3/iDrive e2:")
+print(f"S3_ENDPOINT: {S3_ENDPOINT}")
+print(f"S3_BUCKET: {S3_BUCKET}")
+print(f"S3_KEY configurado: {bool(S3_KEY)}")
+print(f"S3_SECRET configurado: {bool(S3_SECRET)}")
+print("=" * 50)
 
 # --- MODELOS DE LA BASE DE DATOS ---
 
@@ -88,6 +112,29 @@ class EntregaAlumno(db.Model):
     comentarios = db.Column(db.Text)
     fecha_entrega = db.Column(db.DateTime, default=datetime.utcnow)
 
+# --- NUEVO MODELO PARA ASISTENCIA ---
+class Asistencia(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    fecha = db.Column(db.Date, default=datetime.utcnow)
+    estado = db.Column(db.String(10)) # 'P'=Presente, 'F'=Falta, 'R'=Retardo, 'J'=Justificado
+    
+    # Relación para saber de quién es la asistencia
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True))
+
+# --- MODELO PARA REGISTRO DE REPORTES GENERADOS ---
+class ReporteAsistencia(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    grupo = db.Column(db.String(20), nullable=False)  # Ej: "6A"
+    fecha_inicio = db.Column(db.Date, nullable=False)
+    fecha_fin = db.Column(db.Date, nullable=True)  # Puede ser None si es solo un día
+    fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
+    archivo_url = db.Column(db.String(500))  # URL de S3 o ruta local
+    nombre_archivo = db.Column(db.String(200))
+    generado_por = db.Column(db.String(100))  # Username del profesor
+    total_alumnos = db.Column(db.Integer, default=0)
+    total_registros = db.Column(db.Integer, default=0)
+
 # --- MODELO PARA ACTIVIDADES POR GRADO ---
 class ActividadGrado(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -106,6 +153,13 @@ class Cuestionario(db.Model):
     grado = db.Column(db.String(20)) # Para quién es: "1°", "2°", etc.
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
+# --- MODELO: BANCO DE CUESTIONARIOS (BODEGA) ---
+class BancoCuestionario(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    titulo = db.Column(db.String(100), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+
 # --- MODELO PARA HORARIOS ---
 class Horario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -113,29 +167,318 @@ class Horario(db.Model):
     grados = db.Column(db.String(50))  # Ej: "1° y 2°"
     hora = db.Column(db.String(50))    # Ej: "08:00 - 10:00 AM"
 
+# --- NUEVO MODELO PARA PLATAFORMAS ---
+class Plataforma(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(50))
+    url = db.Column(db.String(500))
+    icono = db.Column(db.String(50)) # Guardaremos la clase de FontAwesome (ej: 'fa-code')
+
+# --- MODELOS PARA EL CHAT ---
+
+class Mensaje(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
+    nombre_alumno = db.Column(db.String(100)) # Guardamos el nombre para no hacer tantas consultas
+    grado_grupo = db.Column(db.String(20))    # Para filtrar: "6A" solo lee "6A"
+    contenido = db.Column(db.Text)
+    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Configuracion(db.Model):
+    # Una tabla simple para guardar ajustes globales (como el switch del chat)
+    clave = db.Column(db.String(50), primary_key=True) # Ej: "chat_activo"
+    valor = db.Column(db.String(200)) # Ej: "True" o "False"
+
+# --- MODELO DE RECURSOS ---
+class Recurso(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    titulo = db.Column(db.String(100), nullable=False)
+    archivo_url = db.Column(db.String(300), nullable=False) # Guardará el nombre en S3 o Local
+    tipo_archivo = db.Column(db.String(10)) # 'PDF', 'WORD', 'OTRO'
+    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+
+# --- MODELO: CRITERIOS DE EVALUACIÓN ---
+class CriterioBoleta(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    grado = db.Column(db.String(10)) # Ej: "1", "2", "6"
+    nombre = db.Column(db.String(100)) # Ej: "Entrega de Tareas", "Participación"
+
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
+
+def descargar_de_s3(s3_key):
+    """
+    Descarga un archivo desde iDrive e2 y lo retorna como BytesIO
+    para servirlo directamente al usuario.
+    """
+    try:
+        s3 = boto3.client('s3',
+                        endpoint_url=S3_ENDPOINT,
+                        aws_access_key_id=S3_KEY,
+                        aws_secret_access_key=S3_SECRET,
+                        region_name='us-west-1')
+        
+        # Descargar el objeto
+        s3_object = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+        
+        # Leer el contenido en memoria
+        file_content = s3_object['Body'].read()
+        
+        # Obtener el tipo de contenido
+        content_type = s3_object.get('ContentType', 'application/octet-stream')
+        
+        return BytesIO(file_content), content_type
+        
+    except Exception as e:
+        print(f"❌ Error al descargar de S3: {str(e)}")
+        return None, None
 
 def guardar_archivo(archivo):
     """
     Guarda archivo en S3 si hay credenciales, sino en carpeta local 'uploads'.
-    Retorna: El nombre del archivo o URL para guardar en DB.
+    Retorna: Una tupla (ruta_s3_key_o_filename, es_s3)
     """
     filename = secure_filename(archivo.filename)
+    
+    print(f"\n📁 Intentando guardar archivo: {filename}")
+    print(f"   S3_ENDPOINT configurado: {bool(S3_ENDPOINT)}")
     
     # Intento de S3
     if S3_ENDPOINT and S3_KEY and S3_SECRET:
         try:
-            s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT,
-                              aws_access_key_id=S3_KEY,
-                              aws_secret_access_key=S3_SECRET)
-            s3.upload_fileobj(archivo, S3_BUCKET, filename)
-            return f"{S3_ENDPOINT}/{S3_BUCKET}/{filename}"
+            print(f"   ☁️ Intentando subir a iDrive e2...")
+            s3 = boto3.client('s3', 
+                            endpoint_url=S3_ENDPOINT,
+                            aws_access_key_id=S3_KEY,
+                            aws_secret_access_key=S3_SECRET,
+                            region_name='us-west-1')
+            
+            # Detectar tipo de contenido
+            content_type = archivo.content_type or 'application/octet-stream'
+            
+            # La KEY que usaremos (sin el endpoint, solo el path)
+            s3_key = f"uploads/{filename}"
+            
+            # Reiniciar el puntero del archivo
+            archivo.seek(0)
+            
+            # Subir con ContentType apropiado
+            s3.upload_fileobj(
+                archivo, 
+                S3_BUCKET, 
+                s3_key,
+                ExtraArgs={'ContentType': content_type}
+            )
+            
+            print(f"   ✅ Archivo subido exitosamente a S3")
+            print(f"   🔑 S3 Key: {s3_key}")
+            
+            # IMPORTANTE: Retornamos (s3_key, True) para indicar que está en S3
+            return (s3_key, True)
+            
         except Exception as e:
-            print(f"Error S3 (usando local): {e}")
+            print(f"   ❌ Error al subir a S3: {str(e)}")
+            print(f"   💾 Guardando localmente como fallback...")
+            flash(f'Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
+    else:
+        print(f"   ⚠️ Credenciales S3 incompletas. Guardando localmente...")
     
     # Fallback Local
+    archivo.seek(0)
     archivo.save(os.path.join(UPLOAD_FOLDER, filename))
-    return filename
+    print(f"   💾 Archivo guardado localmente: {filename}")
+    
+    # Retornamos (filename, False) para indicar que es local
+    return (filename, False)
+
+def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
+    """
+    Genera un PDF con el reporte de asistencia y lo guarda en S3
+    Retorna: (url_donde_se_guardo, buffer_pdf, nombre_archivo)
+    """
+    # Buffer en memoria para el PDF
+    buffer = BytesIO()
+    
+    # Crear el documento PDF
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Estilo personalizado para el título
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1a5490'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Título del reporte
+    titulo = f"Reporte de Asistencia - Grupo {grupo}"
+    elements.append(Paragraph(titulo, title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Información de fechas
+    if fecha_fin:
+        periodo = f"Período: {fecha_inicio} a {fecha_fin}"
+    else:
+        periodo = f"Fecha: {fecha_inicio}"
+    
+    info_style = ParagraphStyle(
+        'Info',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=20,
+        alignment=TA_CENTER
+    )
+    elements.append(Paragraph(periodo, info_style))
+    elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", info_style))
+    elements.append(Spacer(1, 20))
+    
+    # Obtener datos de asistencia
+    if isinstance(fecha_inicio, str):
+        fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
+    else:
+        fecha_inicio_obj = fecha_inicio
+    
+    # Buscar alumnos del grupo
+    alumnos = UsuarioAlumno.query.filter_by(grado_grupo=grupo).all()
+    
+    # Crear tabla de datos
+    data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total']]
+    
+    for idx, alumno in enumerate(alumnos, 1):
+        query = Asistencia.query.filter_by(alumno_id=alumno.id)
+        
+        if fecha_fin:
+            fecha_fin_obj = datetime.strptime(fecha_fin, '%Y-%m-%d').date() if isinstance(fecha_fin, str) else fecha_fin
+            query = query.filter(Asistencia.fecha >= fecha_inicio_obj, Asistencia.fecha <= fecha_fin_obj)
+        else:
+            query = query.filter_by(fecha=fecha_inicio_obj)
+        
+        presentes = query.filter_by(estado='P').count()
+        faltas = query.filter_by(estado='F').count()
+        retardos = query.filter_by(estado='R').count()
+        justificados = query.filter_by(estado='J').count()
+        total = presentes + faltas + retardos + justificados
+        
+        data.append([
+            str(idx),
+            alumno.nombre_completo,
+            str(presentes),
+            str(faltas),
+            str(retardos),
+            str(justificados),
+            str(total)
+        ])
+    
+    # Crear la tabla
+    tabla = Table(data, colWidths=[0.5*inch, 3*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1*inch, 1*inch])
+    
+    # Estilo de la tabla
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+    ]))
+    
+    elements.append(tabla)
+    elements.append(Spacer(1, 30))
+    
+    total_alumnos = len(alumnos)
+    total_registros = sum([
+        Asistencia.query.filter_by(alumno_id=a.id).filter(
+            Asistencia.fecha >= fecha_inicio_obj
+        ).count() for a in alumnos
+    ])
+    
+    stats_text = f"""
+    <b>Resumen del Grupo:</b><br/>
+    Total de alumnos: {total_alumnos}<br/>
+    Total de registros de asistencia: {total_registros}
+    """
+    
+    stats_style = ParagraphStyle(
+        'Stats',
+        parent=styles['Normal'],
+        fontSize=11,
+        spaceAfter=20
+    )
+    elements.append(Paragraph(stats_text, stats_style))
+    
+    # Generar el PDF en memoria
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Nombre del archivo
+    fecha_str = fecha_inicio_obj.strftime('%Y%m%d')
+    if fecha_fin:
+        fecha_fin_str = datetime.strptime(fecha_fin, '%Y-%m-%d').strftime('%Y%m%d') if isinstance(fecha_fin, str) else fecha_fin.strftime('%Y%m%d')
+        filename = f"asistencia_{grupo}_{fecha_str}_a_{fecha_fin_str}.pdf"
+    else:
+        filename = f"asistencia_{grupo}_{fecha_str}.pdf"
+    
+    # 🔥 CLAVE: Guardar en S3 pero SIN redirigir al usuario
+    file_url = None
+    if S3_ENDPOINT and S3_KEY and S3_SECRET:
+        try:
+            print(f"☁️ Guardando PDF en iDrive e2: {filename}")
+            s3 = boto3.client('s3',
+                            endpoint_url=S3_ENDPOINT,
+                            aws_access_key_id=S3_KEY,
+                            aws_secret_access_key=S3_SECRET,
+                            region_name='us-west-1')
+            
+            # Crear copia del buffer para subir a S3
+            buffer_copy = BytesIO(buffer.getvalue())
+            s3_key = f"reportes/{filename}"
+            s3.upload_fileobj(buffer_copy, S3_BUCKET, s3_key)
+            
+            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/{s3_key}"
+            print(f"✅ PDF guardado en iDrive e2")
+            
+        except Exception as e:
+            print(f"⚠️ No se pudo guardar en iDrive e2: {str(e)}")
+    
+    # También guardar localmente como respaldo
+    os.makedirs(os.path.join(UPLOAD_FOLDER, 'reportes'), exist_ok=True)
+    local_path = os.path.join(UPLOAD_FOLDER, 'reportes', filename)
+    
+    with open(local_path, 'wb') as f:
+        f.write(buffer.getvalue())
+    
+    print(f"💾 PDF guardado localmente como respaldo")
+    
+    # 🆕 REGISTRAR EL REPORTE EN LA BASE DE DATOS
+    try:
+        nuevo_reporte = ReporteAsistencia(
+            grupo=grupo,
+            fecha_inicio=fecha_inicio_obj,
+            fecha_fin=datetime.strptime(fecha_fin, '%Y-%m-%d').date() if fecha_fin else None,
+            archivo_url=file_url or f"reportes/{filename}",
+            nombre_archivo=filename,
+            generado_por=session.get('user', 'Sistema'),
+            total_alumnos=total_alumnos,
+            total_registros=total_registros
+        )
+        db.session.add(nuevo_reporte)
+        db.session.commit()
+        print(f"📝 Reporte registrado en base de datos")
+    except Exception as e:
+        print(f"⚠️ Error al registrar reporte en BD: {str(e)}")
+        # No afecta la generación del PDF
+    
+    # 🔥 IMPORTANTE: Devolver el buffer para descarga inmediata
+    buffer.seek(0)  # Resetear el puntero al inicio
+    return (file_url, buffer, filename)
 
 # --- RUTAS PRINCIPALES ---
 
@@ -148,37 +491,84 @@ def index():
     # Opcional: Podríamos ordenarlos por ID para que salgan en el orden que los agregaste
     horarios = Horario.query.all()
     
-    # 3. Obtener Grados para el menú (si lo usas)
-    # ... tu lógica existente ...
+    # 3. Obtener Plataformas
+    plataformas = Plataforma.query.all()
+    
+    # 4. NUEVO: Obtener Recursos
+    recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
 
-    return render_template('index.html', anuncios=anuncios, horarios=horarios)
+    return render_template('index.html', anuncios=anuncios, horarios=horarios, plataformas=plataformas, recursos=recursos)
 
 # --- RUTAS DE AUTENTICACIÓN (LOGIN PROFESOR) ---
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # Si ya está logueado, mandar al dashboard
+    if 'user' in session and session.get('tipo_usuario') == 'profesor':
+        return redirect(url_for('admin_dashboard'))
+
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
         
-        # USUARIO Y CONTRASEÑA "QUEMADOS" PARA USO LOCAL (SIMPLE)
-        # Puedes cambiar 'admin' y 'profesor123' por lo que quieras
-        if username == 'admin' and password == 'profesor123':
-            session['user'] = username
-            session['tipo_usuario'] = 'profesor'
-            flash('¡Bienvenido, Profesor!', 'success')
-            return redirect(url_for('admin_dashboard'))
-        else:
-            flash('Credenciales incorrectas', 'danger')
-            return redirect(url_for('login'))
+        # Solo permitimos el usuario 'admin'
+        if username == 'admin':
+            # 1. Buscamos si hay una contraseña guardada en la Base de Datos
+            config_pass = Configuracion.query.get('admin_password')
             
-    return render_template('admin/login.html')
+            # 2. Si existe, verificamos el hash. Si no existe, usamos la default 'profesor123'
+            if config_pass:
+                es_valida = check_password_hash(config_pass.valor, password)
+            else:
+                # Caso inicial (antes de que la cambies por primera vez)
+                es_valida = (password == 'profesor123')
+
+            if es_valida:
+                session.permanent = True
+                session['user'] = username
+                session['tipo_usuario'] = 'profesor'
+                flash('¡Bienvenido, Profesor!', 'success')
+                return redirect(url_for('admin_dashboard'))
+            else:
+                flash('Contraseña incorrecta.', 'danger')
+        else:
+            flash('Usuario incorrecto.', 'danger')
+            
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
     session.clear()
     flash('Sesión cerrada correctamente.')
     return redirect(url_for('index'))
+
+# --- RECUPERAR CONTRASEÑA (PROFESOR) ---
+@app.route('/recuperar-acceso', methods=['GET', 'POST'])
+def recuperar_acceso():
+    if request.method == 'POST':
+        usuario = request.form['usuario']
+        token = request.form['token']
+        nueva_pass = request.form['nueva_pass']
+        
+        # 1. Verificar Usuario y Token Maestro
+        if usuario == 'admin' and token == TOKEN_MAESTRO:
+            # 2. Guardar la nueva contraseña en la BD (Tabla Configuracion)
+            hash_pass = generate_password_hash(nueva_pass)
+            
+            config = Configuracion.query.get('admin_password')
+            if not config:
+                config = Configuracion(clave='admin_password', valor=hash_pass)
+                db.session.add(config)
+            else:
+                config.valor = hash_pass
+            
+            db.session.commit()
+            flash('¡Contraseña restablecida con éxito! Inicia sesión ahora.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash('Token maestro incorrecto o usuario no válido.', 'danger')
+            
+    return render_template('recuperar.html')
 
 # --- RUTAS DE ALUMNOS (LOGIN CON USUARIO/CONTRASEÑA) ---
 
@@ -197,6 +587,7 @@ def login_alumnos():
         
         if alumno and check_password_hash(alumno.password_hash, password):
             # Guardar datos en sesión
+            session.permanent = True  # <--- LÍNEA AGREGADA
             session['alumno_id'] = alumno.id
             session['alumno_nombre'] = alumno.nombre_completo
             session['alumno_grado'] = alumno.grado_grupo
@@ -234,30 +625,126 @@ def admin_dashboard():
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     total_entregas = EntregaAlumno.query.count()
     
+    # Verificar estado del chat
+    config = Configuracion.query.get('chat_activo')
+    chat_activo = True if not config or config.valor == 'True' else False
+    
     return render_template('admin/dashboard.html', 
                          total_equipos=equipos, 
                          reparaciones=pendientes,
                          alumnos_activos=alumnos_activos,
-                         total_entregas=total_entregas)
+                         total_entregas=total_entregas,
+                         chat_activo=chat_activo)
 
-# --- RUTAS DE GESTIÓN DE ALUMNOS (DESDE EL PROFESOR) ---
+# --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
+
+# 1. INTERRUPTOR DEL PROFE
+@app.route('/admin/chat/toggle')
+def toggle_chat():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Buscar la configuración, si no existe la creamos
+    config = Configuracion.query.get('chat_activo')
+    if not config:
+        config = Configuracion(clave='chat_activo', valor='True')
+        db.session.add(config)
+    
+    # Invertir el valor (Si es True pasa a False y viceversa)
+    if config.valor == 'True':
+        config.valor = 'False'
+        flash('Chat desactivado para todos los alumnos.', 'secondary')
+    else:
+        config.valor = 'True'
+        flash('Chat activado. Los alumnos pueden conversar.', 'success')
+    
+    db.session.commit()
+    return redirect(url_for('admin_dashboard'))
+
+# 2. ENVIAR MENSAJE (ALUMNO)
+@app.route('/api/chat/enviar', methods=['POST'])
+def enviar_mensaje():
+    if 'alumno_id' not in session:
+        return {'status': 'error', 'msg': 'No logueado'}, 403
+    
+    # Verificar si el chat está activo
+    config = Configuracion.query.get('chat_activo')
+    if config and config.valor == 'False':
+        return {'status': 'error', 'msg': 'Chat desactivado por el profesor'}, 403
+
+    contenido = request.form.get('mensaje')
+    if not contenido or contenido.strip() == '':
+        return {'status': 'error', 'msg': 'Mensaje vacío'}, 400
+
+    # Guardar mensaje
+    nuevo = Mensaje(
+        alumno_id=session['alumno_id'],
+        nombre_alumno=session['alumno_nombre'],
+        grado_grupo=session['alumno_grado'], # Ej: "6A"
+        contenido=contenido
+    )
+    db.session.add(nuevo)
+    db.session.commit()
+    
+    return {'status': 'ok'}
+
+# 3. LEER MENSAJES (ALUMNO)
+@app.route('/api/chat/obtener')
+def obtener_mensajes():
+    if 'alumno_id' not in session:
+        return {'status': 'error'}, 403
+
+    # Obtener mensajes SOLO de mi grupo (últimos 50)
+    mi_grupo = session['alumno_grado']
+    mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo).order_by(Mensaje.fecha.asc()).all()
+    
+    # Verificar estado del chat
+    config = Configuracion.query.get('chat_activo')
+    chat_activo = True if not config or config.valor == 'True' else False
+
+    # Convertir a JSON para que Javascript lo entienda
+    lista_mensajes = []
+    for m in mensajes:
+        es_mio = (m.alumno_id == session['alumno_id'])
+        lista_mensajes.append({
+            'nombre': 'Yo' if es_mio else m.nombre_alumno,
+            'texto': m.contenido,
+            'es_mio': es_mio,
+            'hora': m.fecha.strftime('%H:%M')
+        })
+
+    return {
+        'mensajes': lista_mensajes,
+        'activo': chat_activo
+    }
+
+# --- RUTAS DE GESTIÓN DE ALUMNOS Y ASISTENCIA ---
 
 @app.route('/admin/alumnos')
 def gestionar_alumnos():
     if 'user' not in session or session.get('tipo_usuario') != 'profesor':
         return redirect(url_for('login'))
     
-    # Obtener todos los alumnos ordenados por grado y nombre
-    alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    # 1. Capturar filtro
+    filtro = request.args.get('grado') # Ej: '6A'
     
-    # Obtener estadísticas
+    # 2. Lógica de filtrado
+    if filtro and filtro != 'Todos':
+        alumnos = UsuarioAlumno.query.filter_by(grado_grupo=filtro).order_by(UsuarioAlumno.nombre_completo).all()
+    else:
+        alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    
+    # 3. Estadísticas
     total_alumnos = UsuarioAlumno.query.count()
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     
+    # 4. Enviar todo a la plantilla
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
-                         alumnos_activos=alumnos_activos)
+                         alumnos_activos=alumnos_activos,
+                         filtro_actual=filtro,
+                         fecha_hoy=date.today().isoformat())  # ← AGREGAR ESTA LÍNEA
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 def agregar_alumno():
@@ -329,6 +816,83 @@ def eliminar_alumno(id):
     flash(f'Alumno {nombre} eliminado del sistema.', 'warning')
     return redirect(url_for('gestionar_alumnos'))
 
+@app.route('/admin/asistencia/tomar', methods=['POST'])
+def tomar_asistencia():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Recibimos la fecha del formulario (o usamos hoy)
+    fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
+    fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+    
+    # Recorremos el formulario. Los campos vienen como "asistencia_IDALUMNO"
+    for key, value in request.form.items():
+        if key.startswith('asistencia_'):
+            alumno_id = int(key.split('_')[1])
+            estado = value # P, F, R
+            
+            # Buscar si ya se tomó lista ese día para ese alumno (para actualizar en vez de duplicar)
+            registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
+            
+            if registro:
+                registro.estado = estado # Actualizar
+            else:
+                # Crear nuevo
+                nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
+                db.session.add(nuevo)
+    
+    db.session.commit()
+    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
+    return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
+
+@app.route('/admin/reporte-asistencia/<grupo>')
+def generar_reporte_asistencia(grupo):
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Obtener fechas del reporte
+    fecha_inicio = request.args.get('fecha_inicio', date.today().isoformat())
+    fecha_fin = request.args.get('fecha_fin', None)
+    
+    try:
+        # 🔥 Generar el PDF (se guarda automáticamente en iDrive e2)
+        url_guardado, buffer_pdf, nombre_archivo = generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin)
+        
+        # Mostrar mensaje al usuario
+        if url_guardado:
+            flash('✅ Reporte generado y guardado automáticamente en iDrive e2', 'success')
+        else:
+            flash('✅ Reporte generado correctamente', 'success')
+        
+        # 🔥 DESCARGAR el PDF directamente al navegador del usuario
+        return send_file(
+            buffer_pdf,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=nombre_archivo
+        )
+        
+    except Exception as e:
+        print(f"❌ Error completo: {str(e)}")
+        flash(f'❌ Error al generar reporte: {str(e)}', 'danger')
+        return redirect(url_for('gestionar_alumnos'))
+
+@app.route('/admin/descargar-reporte/<path:filename>')
+def descargar_reporte(filename):
+    """Ruta alternativa para descargar reportes guardados localmente"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    try:
+        return send_from_directory(
+            os.path.join(UPLOAD_FOLDER, 'reportes'),
+            filename,
+            as_attachment=True
+        )
+    except Exception as e:
+        flash(f'Error al descargar reporte: {str(e)}', 'danger')
+        return redirect(url_for('gestionar_alumnos'))
+
 @app.route('/admin/alumnos/entregas')
 def ver_entregas_alumnos():
     if 'user' not in session or session.get('tipo_usuario') != 'profesor':
@@ -361,6 +925,144 @@ def calificar_entrega(id):
     
     flash(f'Entrega de {entrega.nombre_alumno} calificada con {entrega.estrellas} estrellas.', 'success')
     return redirect(url_for('ver_entregas_alumnos'))
+
+# --- RUTAS PARA VER REPORTES GENERADOS ---
+
+@app.route('/admin/reportes-asistencia')
+def ver_reportes_asistencia():
+    """Página para ver todos los reportes generados con filtros"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Obtener filtros
+    filtro_grupo = request.args.get('grupo', 'Todos')
+    filtro_mes = request.args.get('mes', '')
+    filtro_anio = request.args.get('anio', '')
+    
+    # Query base
+    query = ReporteAsistencia.query
+    
+    # Aplicar filtro de grupo
+    if filtro_grupo and filtro_grupo != 'Todos':
+        query = query.filter_by(grupo=filtro_grupo)
+    
+    # Aplicar filtro de mes/año
+    if filtro_mes and filtro_anio:
+        try:
+            mes = int(filtro_mes)
+            anio = int(filtro_anio)
+            # Filtrar reportes del mes seleccionado
+            primer_dia = date(anio, mes, 1)
+            if mes == 12:
+                ultimo_dia = date(anio + 1, 1, 1) - timedelta(days=1)
+            else:
+                ultimo_dia = date(anio, mes + 1, 1) - timedelta(days=1)
+            
+            query = query.filter(
+                ReporteAsistencia.fecha_inicio >= primer_dia,
+                ReporteAsistencia.fecha_inicio <= ultimo_dia
+            )
+        except:
+            pass
+    
+    # Ordenar por fecha de generación (más reciente primero)
+    reportes = query.order_by(ReporteAsistencia.fecha_generacion.desc()).all()
+    
+    # Obtener lista de grupos únicos para el filtro
+    grupos_disponibles = db.session.query(ReporteAsistencia.grupo).distinct().all()
+    grupos_disponibles = [g[0] for g in grupos_disponibles]
+    
+    # Estadísticas
+    total_reportes = ReporteAsistencia.query.count()
+    reportes_este_mes = ReporteAsistencia.query.filter(
+        ReporteAsistencia.fecha_generacion >= date.today().replace(day=1)
+    ).count()
+    
+    return render_template('admin/reportes_asistencia.html',
+                         reportes=reportes,
+                         grupos_disponibles=grupos_disponibles,
+                         filtro_grupo=filtro_grupo,
+                         filtro_mes=filtro_mes,
+                         filtro_anio=filtro_anio,
+                         total_reportes=total_reportes,
+                         reportes_este_mes=reportes_este_mes,
+                         fecha_hoy=date.today().isoformat())
+
+@app.route('/admin/descargar-reporte/<int:reporte_id>')
+def descargar_reporte_guardado(reporte_id):
+    """Descargar un reporte previamente generado"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    reporte = ReporteAsistencia.query.get_or_404(reporte_id)
+    
+    try:
+        # Si está en S3
+        if reporte.archivo_url and reporte.archivo_url.startswith('http'):
+            if S3_ENDPOINT and S3_KEY and S3_SECRET:
+                s3 = boto3.client('s3',
+                                endpoint_url=S3_ENDPOINT,
+                                aws_access_key_id=S3_KEY,
+                                aws_secret_access_key=S3_SECRET,
+                                region_name='us-west-1')
+                
+                # Extraer el key del archivo
+                key = f"reportes/{reporte.nombre_archivo}"
+                
+                # Descargar desde S3
+                s3_object = s3.get_object(Bucket=S3_BUCKET, Key=key)
+                pdf_content = s3_object['Body'].read()
+                
+                return send_file(
+                    BytesIO(pdf_content),
+                    mimetype='application/pdf',
+                    as_attachment=True,
+                    download_name=reporte.nombre_archivo
+                )
+        
+        # Si está guardado localmente
+        return send_from_directory(
+            os.path.join(UPLOAD_FOLDER, 'reportes'),
+            reporte.nombre_archivo,
+            as_attachment=True
+        )
+        
+    except Exception as e:
+        flash(f'Error al descargar reporte: {str(e)}', 'danger')
+        return redirect(url_for('ver_reportes_asistencia'))
+
+@app.route('/admin/eliminar-reporte/<int:reporte_id>')
+def eliminar_reporte(reporte_id):
+    """Eliminar un reporte del registro (no borra el archivo físico)"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    reporte = ReporteAsistencia.query.get_or_404(reporte_id)
+    
+    try:
+        # Opcionalmente eliminar de S3
+        if reporte.archivo_url and reporte.archivo_url.startswith('http') and S3_ENDPOINT and S3_KEY and S3_SECRET:
+            try:
+                s3 = boto3.client('s3',
+                                endpoint_url=S3_ENDPOINT,
+                                aws_access_key_id=S3_KEY,
+                                aws_secret_access_key=S3_SECRET,
+                                region_name='us-west-1')
+                key = f"reportes/{reporte.nombre_archivo}"
+                s3.delete_object(Bucket=S3_BUCKET, Key=key)
+                print(f"🗑️ Archivo eliminado de S3: {key}")
+            except Exception as e:
+                print(f"⚠️ No se pudo eliminar de S3: {e}")
+        
+        # Eliminar registro de la base de datos
+        db.session.delete(reporte)
+        db.session.commit()
+        flash('Reporte eliminado correctamente', 'success')
+        
+    except Exception as e:
+        flash(f'Error al eliminar reporte: {str(e)}', 'danger')
+    
+    return redirect(url_for('ver_reportes_asistencia'))
 
 # --- RUTAS DE ALUMNOS (PANEL Y SUBIDA DE TAREAS) ---
 
@@ -414,15 +1116,15 @@ def subir_tarea():
         # Obtener datos del alumno
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         
-        # Usamos nuestra función inteligente que decide si es S3 o Local
-        ruta = guardar_archivo(archivo)
+        # CAMBIO AQUÍ: Ahora guardar_archivo retorna tupla
+        ruta, es_s3 = guardar_archivo(archivo)
         
         # Guardar en DB
         nueva_entrega = EntregaAlumno(
             alumno_id=alumno.id,
             nombre_alumno=alumno.nombre_completo,
             grado_grupo=alumno.grado_grupo,
-            archivo_url=ruta
+            archivo_url=ruta  # Guardamos la KEY de S3 o filename local
         )
         db.session.add(nueva_entrega)
         db.session.commit()
@@ -638,6 +1340,69 @@ def eliminar_cuestionario(id):
     flash('Cuestionario eliminado.', 'secondary')
     return redirect(url_for('gestionar_cuestionarios'))
 
+# --- GESTIÓN DEL BANCO DE CUESTIONARIOS ---
+
+@app.route('/admin/banco')
+def gestionar_banco():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Ordenar por fecha de creación
+    banco = BancoCuestionario.query.order_by(BancoCuestionario.fecha_creacion.desc()).all()
+    return render_template('admin/Banco_cuestionarios.html', banco=banco)
+
+@app.route('/admin/banco/agregar', methods=['POST'])
+def agregar_al_banco():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    nuevo = BancoCuestionario(
+        titulo=request.form['titulo'],
+        url=request.form['url']
+    )
+    db.session.add(nuevo)
+    db.session.commit()
+    flash('Cuestionario guardado en la bodega.', 'success')
+    return redirect(url_for('gestionar_banco'))
+
+@app.route('/admin/banco/eliminar/<int:id>')
+def eliminar_del_banco(id):
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    item = BancoCuestionario.query.get_or_404(id)
+    db.session.delete(item)
+    db.session.commit()
+    flash('Plantilla eliminada.', 'warning')
+    return redirect(url_for('gestionar_banco'))
+
+# --- LA MAGIA: ASIGNAR DESDE EL BANCO ---
+@app.route('/admin/banco/asignar', methods=['POST'])
+def asignar_desde_banco():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    # 1. Obtenemos el ID de la plantilla y el grupo destino
+    plantilla_id = request.form['plantilla_id']
+    grado = request.form['grado']
+    grupo = request.form['grupo']
+    target = f"{grado}{grupo}" # Ej: "6A"
+    
+    # 2. Buscamos el original en la bodega
+    original = BancoCuestionario.query.get(plantilla_id)
+    
+    if original:
+        # 3. COPIAMOS los datos a la tabla real 'Cuestionario'
+        nuevo_activo = Cuestionario(
+            titulo=original.titulo,
+            url=original.url,
+            grado=target # Aquí es donde se define para quién es
+        )
+        db.session.add(nuevo_activo)
+        db.session.commit()
+        flash(f'¡Examen "{original.titulo}" liberado para el grupo {target}!', 'success')
+    else:
+        flash('Error al buscar la plantilla.', 'danger')
+        
+    return redirect(url_for('gestionar_banco'))
+
 # --- RUTAS PÚBLICAS DE GRADOS ---
 
 @app.route('/grado/<int:numero_grado>')
@@ -718,11 +1483,266 @@ def eliminar_horario(id):
     flash('Horario eliminado.', 'warning')
     return redirect(url_for('gestionar_horarios'))
 
+# --- GESTIÓN DE PLATAFORMAS ---
+
+@app.route('/admin/plataformas')
+def gestionar_plataformas():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    plataformas = Plataforma.query.all()
+    return render_template('admin/plataformas.html', plataformas=plataformas)
+
+@app.route('/admin/plataformas/agregar', methods=['POST'])
+def agregar_plataforma():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    nueva = Plataforma(
+        nombre=request.form['nombre'],
+        url=request.form['url'],
+        icono=request.form['icono']
+    )
+    db.session.add(nueva)
+    db.session.commit()
+    flash('Plataforma agregada.', 'success')
+    return redirect(url_for('gestionar_plataformas'))
+
+@app.route('/admin/plataformas/eliminar/<int:id>')
+def eliminar_plataforma(id):
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    p = Plataforma.query.get_or_404(id)
+    db.session.delete(p)
+    db.session.commit()
+    flash('Plataforma eliminada.', 'warning')
+    return redirect(url_for('gestionar_plataformas'))
+
+# --- GESTIÓN DE ENTREGAS (CON FILTRO) ---
+
+@app.route('/admin/entregas')
+def gestionar_entregas():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # 1. Capturamos el filtro de la URL (Ej: ?grado=6A)
+    filtro = request.args.get('grado')
+    
+    # 2. Iniciamos la consulta uniendo Entregas con Alumnos
+    # (Necesitamos 'join' para saber el grado del alumno que mandó la tarea)
+    query = EntregaAlumno.query.join(UsuarioAlumno)
+    
+    # 3. Aplicamos el filtro si existe
+    if filtro and filtro != 'Todos':
+        query = query.filter(UsuarioAlumno.grado_grupo == filtro)
+    
+    # 4. Ordenamos: Primero las más recientes
+    entregas = query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
+    
+    return render_template('admin/entregas_alumnos.html', 
+                         entregas=entregas, 
+                         filtro_actual=filtro)
+
+# --- GESTIÓN DE RECURSOS (ADMIN) ---
+
+@app.route('/admin/recursos')
+def gestionar_recursos():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Ordenamos: lo más nuevo primero
+    recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
+    return render_template('admin/recursos.html', recursos=recursos)
+
+@app.route('/admin/recursos/subir', methods=['POST'])
+def subir_recurso():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    archivo = request.files.get('archivo')
+    titulo = request.form.get('titulo')
+
+    if archivo and titulo:
+        try:
+            # CAMBIO: Ahora recibimos tupla
+            ruta_archivo, es_s3 = guardar_archivo(archivo)
+            
+            # Detectar tipo de archivo
+            ext = archivo.filename.split('.')[-1].lower()
+            if ext == 'pdf':
+                tipo = 'PDF'
+            elif ext in ['doc', 'docx']:
+                tipo = 'WORD'
+            else:
+                tipo = 'OTRO'
+
+            # Guardar en BD
+            nuevo = Recurso(
+                titulo=titulo, 
+                archivo_url=ruta_archivo,  # KEY de S3 o filename
+                tipo_archivo=tipo
+            )
+            db.session.add(nuevo)
+            db.session.commit()
+            
+            flash('Recurso publicado correctamente.', 'success')
+        except Exception as e:
+            flash(f'Error al subir: {e}', 'danger')
+            
+    return redirect(url_for('gestionar_recursos'))
+
+@app.route('/admin/recursos/eliminar/<int:id>')
+def eliminar_recurso(id):
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    recurso = Recurso.query.get_or_404(id)
+    # Borramos de la base de datos (el archivo se queda en S3/Local por seguridad)
+    db.session.delete(recurso)
+    db.session.commit()
+    flash('Recurso eliminado de la lista.', 'warning')
+    return redirect(url_for('gestionar_recursos'))
+
 # --- RUTA PARA SERVIR ARCHIVOS LOCALES (IMPORTANTE) ---
 # Esta ruta permite ver las imágenes si están guardadas en tu PC
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+# --- NUEVA RUTA PARA SERVIR ARCHIVOS DE S3 ---
+
+@app.route('/ver-archivo/<path:archivo_path>')
+def ver_archivo(archivo_path):
+    """
+    Sirve archivos tanto de S3 como locales.
+    Detecta automáticamente de dónde viene el archivo.
+    """
+    try:
+        # Si el archivo_path contiene "uploads/" es de S3
+        if archivo_path.startswith('uploads/'):
+            # Es un archivo de S3
+            if S3_ENDPOINT and S3_KEY and S3_SECRET:
+                file_stream, content_type = descargar_de_s3(archivo_path)
+                
+                if file_stream:
+                    # Extraer el nombre del archivo
+                    filename = archivo_path.split('/')[-1]
+                    
+                    return send_file(
+                        file_stream,
+                        mimetype=content_type,
+                        as_attachment=False,  # False = abrir en navegador
+                        download_name=filename
+                    )
+                else:
+                    flash('Error al cargar el archivo desde la nube', 'danger')
+                    return redirect(url_for('index'))
+            else:
+                flash('Configuración de almacenamiento no disponible', 'danger')
+                return redirect(url_for('index'))
+        
+        # Si no empieza con "uploads/", es un archivo local
+        else:
+            filename = archivo_path
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            
+            if os.path.exists(file_path):
+                # Detectar mimetype
+                if filename.endswith('.pdf'):
+                    mimetype = 'application/pdf'
+                elif filename.endswith(('.doc', '.docx')):
+                    mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                else:
+                    mimetype = 'application/octet-stream'
+                
+                return send_file(
+                    file_path,
+                    mimetype=mimetype,
+                    as_attachment=False,
+                    download_name=filename
+                )
+            else:
+                flash('Archivo no encontrado', 'danger')
+                return redirect(url_for('index'))
+                
+    except Exception as e:
+        print(f"❌ Error al servir archivo: {str(e)}")
+        flash(f'Error al cargar el archivo: {str(e)}', 'danger')
+        return redirect(url_for('index'))
+
+# --- SISTEMA DE BOLETAS Y REPORTES ---
+
+# 1. CONFIGURAR CRITERIOS (Qué evaluamos)
+@app.route('/admin/boletas/config', methods=['GET', 'POST'])
+def configurar_boletas():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        grado = request.form['grado']
+        criterio = request.form['criterio']
+        nuevo = CriterioBoleta(grado=grado, nombre=criterio)
+        db.session.add(nuevo)
+        db.session.commit()
+        flash('Criterio agregado correctamente.', 'success')
+    
+    # Obtener todos los criterios ordenados por grado
+    criterios = CriterioBoleta.query.order_by(CriterioBoleta.grado).all()
+    return render_template('admin/boletas_config.html', criterios=criterios)
+
+@app.route('/admin/boletas/borrar-criterio/<int:id>')
+def borrar_criterio(id):
+    if 'user' not in session: return redirect(url_for('login'))
+    c = CriterioBoleta.query.get_or_404(id)
+    db.session.delete(c)
+    db.session.commit()
+    return redirect(url_for('configurar_boletas'))
+
+# 2. GENERADOR DE BOLETA (Formulario de llenado)
+@app.route('/admin/boletas/generar', methods=['GET', 'POST'])
+def generar_boleta():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    alumno = None
+    criterios = []
+    
+    # Si recibimos un ID de alumno, cargamos sus datos y los criterios de su grado
+    alumno_id = request.args.get('alumno_id')
+    if alumno_id:
+        alumno = UsuarioAlumno.query.get_or_404(alumno_id)
+        # Extraemos solo el número del grado (Ej: "6A" -> "6")
+        grado_num = ''.join(filter(str.isdigit, alumno.grado_grupo))
+        criterios = CriterioBoleta.query.filter_by(grado=grado_num).all()
+
+    # Si enviamos el formulario lleno (POST), mostramos la boleta final
+    if request.method == 'POST':
+        datos_evaluacion = {}
+        promedio = 0
+        total_puntos = 0
+        conteo = 0
+        
+        # Recolectamos las calificaciones del form
+        for key, value in request.form.items():
+            if key.startswith('nota_'):
+                criterio_nombre = key.replace('nota_', '')
+                nota = float(value) if value else 0
+                datos_evaluacion[criterio_nombre] = nota
+                total_puntos += nota
+                conteo += 1
+        
+        if conteo > 0:
+            promedio = round(total_puntos / conteo, 1)
+            
+        return render_template('admin/boleta_imprimir.html', 
+                             alumno=alumno, 
+                             evaluacion=datos_evaluacion, 
+                             observaciones=request.form.get('observaciones'),
+                             promedio=promedio,
+                             fecha=datetime.now())
+
+    # Vista inicial: Buscador de alumnos
+    alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    return render_template('admin/boleta_form.html', alumnos=alumnos, alumno_seleccionado=alumno, criterios=criterios)
 
 # --- INICIALIZADOR ---
 

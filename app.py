@@ -180,7 +180,7 @@ class Mensaje(db.Model):
 class Configuracion(db.Model):
     # Una tabla simple para guardar ajustes globales (como el switch del chat)
     clave = db.Column(db.String(50), primary_key=True) # Ej: "chat_activo"
-    valor = db.Column(db.String(50)) # Ej: "True" o "False"
+    valor = db.Column(db.String(200)) # Ej: "True" o "False"
 
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 

@@ -153,6 +153,13 @@ class Cuestionario(db.Model):
     grado = db.Column(db.String(20)) # Para quién es: "1°", "2°", etc.
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
+# --- MODELO: BANCO DE CUESTIONARIOS (BODEGA) ---
+class BancoCuestionario(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    titulo = db.Column(db.String(100), nullable=False)
+    url = db.Column(db.String(500), nullable=False)
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+
 # --- MODELO PARA HORARIOS ---
 class Horario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1326,6 +1333,69 @@ def eliminar_cuestionario(id):
     db.session.commit()
     flash('Cuestionario eliminado.', 'secondary')
     return redirect(url_for('gestionar_cuestionarios'))
+
+# --- GESTIÓN DEL BANCO DE CUESTIONARIOS ---
+
+@app.route('/admin/banco')
+def gestionar_banco():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Ordenar por fecha de creación
+    banco = BancoCuestionario.query.order_by(BancoCuestionario.fecha_creacion.desc()).all()
+    return render_template('admin/banco_cuestionarios.html', banco=banco)
+
+@app.route('/admin/banco/agregar', methods=['POST'])
+def agregar_al_banco():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    nuevo = BancoCuestionario(
+        titulo=request.form['titulo'],
+        url=request.form['url']
+    )
+    db.session.add(nuevo)
+    db.session.commit()
+    flash('Cuestionario guardado en la bodega.', 'success')
+    return redirect(url_for('gestionar_banco'))
+
+@app.route('/admin/banco/eliminar/<int:id>')
+def eliminar_del_banco(id):
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    item = BancoCuestionario.query.get_or_404(id)
+    db.session.delete(item)
+    db.session.commit()
+    flash('Plantilla eliminada.', 'warning')
+    return redirect(url_for('gestionar_banco'))
+
+# --- LA MAGIA: ASIGNAR DESDE EL BANCO ---
+@app.route('/admin/banco/asignar', methods=['POST'])
+def asignar_desde_banco():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    # 1. Obtenemos el ID de la plantilla y el grupo destino
+    plantilla_id = request.form['plantilla_id']
+    grado = request.form['grado']
+    grupo = request.form['grupo']
+    target = f"{grado}{grupo}" # Ej: "6A"
+    
+    # 2. Buscamos el original en la bodega
+    original = BancoCuestionario.query.get(plantilla_id)
+    
+    if original:
+        # 3. COPIAMOS los datos a la tabla real 'Cuestionario'
+        nuevo_activo = Cuestionario(
+            titulo=original.titulo,
+            url=original.url,
+            grado=target # Aquí es donde se define para quién es
+        )
+        db.session.add(nuevo_activo)
+        db.session.commit()
+        flash(f'¡Examen "{original.titulo}" liberado para el grupo {target}!', 'success')
+    else:
+        flash('Error al buscar la plantilla.', 'danger')
+        
+    return redirect(url_for('gestionar_banco'))
 
 # --- RUTAS PÚBLICAS DE GRADOS ---
 

@@ -192,53 +192,90 @@ class Recurso(db.Model):
 
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 
+def descargar_de_s3(s3_key):
+    """
+    Descarga un archivo desde iDrive e2 y lo retorna como BytesIO
+    para servirlo directamente al usuario.
+    """
+    try:
+        s3 = boto3.client('s3',
+                        endpoint_url=S3_ENDPOINT,
+                        aws_access_key_id=S3_KEY,
+                        aws_secret_access_key=S3_SECRET,
+                        region_name='us-west-1')
+        
+        # Descargar el objeto
+        s3_object = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+        
+        # Leer el contenido en memoria
+        file_content = s3_object['Body'].read()
+        
+        # Obtener el tipo de contenido
+        content_type = s3_object.get('ContentType', 'application/octet-stream')
+        
+        return BytesIO(file_content), content_type
+        
+    except Exception as e:
+        print(f"❌ Error al descargar de S3: {str(e)}")
+        return None, None
+
 def guardar_archivo(archivo):
     """
     Guarda archivo en S3 si hay credenciales, sino en carpeta local 'uploads'.
-    Retorna: El nombre del archivo o URL para guardar en DB.
+    Retorna: Una tupla (ruta_s3_key_o_filename, es_s3)
     """
     filename = secure_filename(archivo.filename)
     
-    # Debug: Verificar configuración
-    print(f"\n🔍 Intentando guardar archivo: {filename}")
+    print(f"\n📁 Intentando guardar archivo: {filename}")
     print(f"   S3_ENDPOINT configurado: {bool(S3_ENDPOINT)}")
-    print(f"   S3_KEY configurado: {bool(S3_KEY)}")
-    print(f"   S3_SECRET configurado: {bool(S3_SECRET)}")
     
     # Intento de S3
     if S3_ENDPOINT and S3_KEY and S3_SECRET:
         try:
-            print(f"   ☁️  Intentando subir a iDrive e2...")
+            print(f"   ☁️ Intentando subir a iDrive e2...")
             s3 = boto3.client('s3', 
                             endpoint_url=S3_ENDPOINT,
                             aws_access_key_id=S3_KEY,
                             aws_secret_access_key=S3_SECRET,
-                            region_name='us-west-1')  # Región agregada
+                            region_name='us-west-1')
+            
+            # Detectar tipo de contenido
+            content_type = archivo.content_type or 'application/octet-stream'
+            
+            # La KEY que usaremos (sin el endpoint, solo el path)
+            s3_key = f"uploads/{filename}"
             
             # Reiniciar el puntero del archivo
             archivo.seek(0)
             
-            s3.upload_fileobj(archivo, S3_BUCKET, filename)
+            # Subir con ContentType apropiado
+            s3.upload_fileobj(
+                archivo, 
+                S3_BUCKET, 
+                s3_key,
+                ExtraArgs={'ContentType': content_type}
+            )
             
-            # URL pública del archivo
-            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/{filename}"
             print(f"   ✅ Archivo subido exitosamente a S3")
-            print(f"   🔗 URL: {file_url}")
+            print(f"   🔑 S3 Key: {s3_key}")
             
-            return file_url
+            # IMPORTANTE: Retornamos (s3_key, True) para indicar que está en S3
+            return (s3_key, True)
             
         except Exception as e:
             print(f"   ❌ Error al subir a S3: {str(e)}")
-            print(f"   📁 Guardando localmente como fallback...")
+            print(f"   💾 Guardando localmente como fallback...")
             flash(f'Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
     else:
-        print(f"   ⚠️  Credenciales S3 incompletas. Guardando localmente...")
+        print(f"   ⚠️ Credenciales S3 incompletas. Guardando localmente...")
     
     # Fallback Local
-    archivo.seek(0)  # Reiniciar puntero
+    archivo.seek(0)
     archivo.save(os.path.join(UPLOAD_FOLDER, filename))
     print(f"   💾 Archivo guardado localmente: {filename}")
-    return filename
+    
+    # Retornamos (filename, False) para indicar que es local
+    return (filename, False)
 
 def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     """
@@ -389,9 +426,10 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
             
             # Crear copia del buffer para subir a S3
             buffer_copy = BytesIO(buffer.getvalue())
-            s3.upload_fileobj(buffer_copy, S3_BUCKET, f"reportes/{filename}")
+            s3_key = f"reportes/{filename}"
+            s3.upload_fileobj(buffer_copy, S3_BUCKET, s3_key)
             
-            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/reportes/{filename}"
+            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/{s3_key}"
             print(f"✅ PDF guardado en iDrive e2")
             
         except Exception as e:
@@ -1065,15 +1103,15 @@ def subir_tarea():
         # Obtener datos del alumno
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         
-        # Usamos nuestra función inteligente que decide si es S3 o Local
-        ruta = guardar_archivo(archivo)
+        # CAMBIO AQUÍ: Ahora guardar_archivo retorna tupla
+        ruta, es_s3 = guardar_archivo(archivo)
         
         # Guardar en DB
         nueva_entrega = EntregaAlumno(
             alumno_id=alumno.id,
             nombre_alumno=alumno.nombre_completo,
             grado_grupo=alumno.grado_grupo,
-            archivo_url=ruta
+            archivo_url=ruta  # Guardamos la KEY de S3 o filename local
         )
         db.session.add(nueva_entrega)
         db.session.commit()
@@ -1451,10 +1489,10 @@ def subir_recurso():
 
     if archivo and titulo:
         try:
-            # 1. Usamos tu función existente para guardar en S3 o Local
-            ruta_archivo = guardar_archivo(archivo)
+            # CAMBIO: Ahora recibimos tupla
+            ruta_archivo, es_s3 = guardar_archivo(archivo)
             
-            # 2. Detectar tipo de archivo para el icono
+            # Detectar tipo de archivo
             ext = archivo.filename.split('.')[-1].lower()
             if ext == 'pdf':
                 tipo = 'PDF'
@@ -1463,8 +1501,12 @@ def subir_recurso():
             else:
                 tipo = 'OTRO'
 
-            # 3. Guardar en Base de Datos
-            nuevo = Recurso(titulo=titulo, archivo_url=ruta_archivo, tipo_archivo=tipo)
+            # Guardar en BD
+            nuevo = Recurso(
+                titulo=titulo, 
+                archivo_url=ruta_archivo,  # KEY de S3 o filename
+                tipo_archivo=tipo
+            )
             db.session.add(nuevo)
             db.session.commit()
             
@@ -1491,6 +1533,67 @@ def eliminar_recurso(id):
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+# --- NUEVA RUTA PARA SERVIR ARCHIVOS DE S3 ---
+
+@app.route('/ver-archivo/<path:archivo_path>')
+def ver_archivo(archivo_path):
+    """
+    Sirve archivos tanto de S3 como locales.
+    Detecta automáticamente de dónde viene el archivo.
+    """
+    try:
+        # Si el archivo_path contiene "uploads/" es de S3
+        if archivo_path.startswith('uploads/'):
+            # Es un archivo de S3
+            if S3_ENDPOINT and S3_KEY and S3_SECRET:
+                file_stream, content_type = descargar_de_s3(archivo_path)
+                
+                if file_stream:
+                    # Extraer el nombre del archivo
+                    filename = archivo_path.split('/')[-1]
+                    
+                    return send_file(
+                        file_stream,
+                        mimetype=content_type,
+                        as_attachment=False,  # False = abrir en navegador
+                        download_name=filename
+                    )
+                else:
+                    flash('Error al cargar el archivo desde la nube', 'danger')
+                    return redirect(url_for('index'))
+            else:
+                flash('Configuración de almacenamiento no disponible', 'danger')
+                return redirect(url_for('index'))
+        
+        # Si no empieza con "uploads/", es un archivo local
+        else:
+            filename = archivo_path
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            
+            if os.path.exists(file_path):
+                # Detectar mimetype
+                if filename.endswith('.pdf'):
+                    mimetype = 'application/pdf'
+                elif filename.endswith(('.doc', '.docx')):
+                    mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                else:
+                    mimetype = 'application/octet-stream'
+                
+                return send_file(
+                    file_path,
+                    mimetype=mimetype,
+                    as_attachment=False,
+                    download_name=filename
+                )
+            else:
+                flash('Archivo no encontrado', 'danger')
+                return redirect(url_for('index'))
+                
+    except Exception as e:
+        print(f"❌ Error al servir archivo: {str(e)}")
+        flash(f'Error al cargar el archivo: {str(e)}', 'danger')
+        return redirect(url_for('index'))
 
 # --- INICIALIZADOR ---
 

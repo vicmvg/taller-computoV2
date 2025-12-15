@@ -48,13 +48,15 @@
                                 <small class="text-muted">{{ r.fecha.strftime('%d/%m/%Y') }}</small>
                             </td>
                             <td class="text-end pe-4">
-                                {% if r.archivo_url.startswith('http') %}
-                                    <a href="{{ r.archivo_url }}" target="_blank" class="btn btn-sm btn-light border me-1"><i class="fas fa-eye"></i></a>
-                                {% else %}
-                                    <a href="{{ url_for('uploaded_file', filename=r.archivo_url) }}" target="_blank" class="btn btn-sm btn-light border me-1"><i class="fas fa-eye"></i></a>
-                                {% endif %}
+                                <!-- ACTUALIZADO: Usar nueva ruta ver_archivo -->
+                                <a href="{{ url_for('ver_archivo', archivo_path=r.archivo_url) }}" 
+                                   target="_blank" class="btn btn-sm btn-light border me-1">
+                                    <i class="fas fa-eye"></i> Ver
+                                </a>
                                 
-                                <a href="{{ url_for('eliminar_recurso', id=r.id) }}" class="btn btn-sm btn-outline-danger border-0" onclick="return confirm('¿Borrar este archivo?')">
+                                <a href="{{ url_for('eliminar_recurso', id=r.id) }}" 
+                                   class="btn btn-sm btn-outline-danger border-0" 
+                                   onclick="return confirm('¿Borrar este archivo?')">
                                     <i class="fas fa-trash"></i>
                                 </a>
                             </td>

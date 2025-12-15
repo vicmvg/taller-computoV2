@@ -167,15 +167,15 @@
                             
                             <h5 class="fw-bold mb-3">{{ r.titulo }}</h5>
                             
-                            {% if r.archivo_url.startswith('http') %}
-                                <a href="{{ r.archivo_url }}" target="_blank" class="btn btn-outline-primary rounded-pill px-4">
-                                    Descargar <i class="fas fa-download ms-2"></i>
-                                </a>
-                            {% else %}
-                                <a href="{{ url_for('uploaded_file', filename=r.archivo_url) }}" target="_blank" class="btn btn-outline-primary rounded-pill px-4">
-                                    Descargar <i class="fas fa-download ms-2"></i>
-                                </a>
-                            {% endif %}
+                            <!-- ACTUALIZADO: Usar la nueva ruta ver_archivo -->
+                            <a href="{{ url_for('ver_archivo', archivo_path=r.archivo_url) }}" target="_blank" class="btn btn-outline-primary rounded-pill px-4">
+                                Ver / Descargar <i class="fas fa-download ms-2"></i>
+                            </a>
+                            
+                            <p class="text-muted small mt-2">
+                                <i class="fas fa-calendar"></i> 
+                                {{ r.fecha.strftime('%d/%m/%Y') }}
+                            </p>
                         </div>
                     </div>
                     {% endfor %}

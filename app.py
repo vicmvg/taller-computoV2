@@ -203,6 +203,21 @@ class CriterioBoleta(db.Model):
     grado = db.Column(db.String(10)) # Ej: "1", "2", "6"
     nombre = db.Column(db.String(100)) # Ej: "Entrega de Tareas", "Participación"
 
+# --- MODELO PARA BOLETAS GENERADAS ---
+class BoletaGenerada(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    archivo_url = db.Column(db.String(500))  # URL de S3 o ruta local
+    nombre_archivo = db.Column(db.String(200))
+    fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
+    periodo = db.Column(db.String(50))  # Ej: "1er Bimestre 2024"
+    promedio = db.Column(db.Float)
+    observaciones = db.Column(db.Text)
+    generado_por = db.Column(db.String(100))  # Username del profesor
+    
+    # Relación para obtener datos del alumno
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True))
+
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 
 def descargar_de_s3(s3_key):
@@ -479,6 +494,92 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     # 🔥 IMPORTANTE: Devolver el buffer para descarga inmediata
     buffer.seek(0)  # Resetear el puntero al inicio
     return (file_url, buffer, filename)
+
+def generar_pdf_boleta(alumno, datos_evaluacion, observaciones, promedio, periodo):
+    """Genera PDF de boleta y guarda en S3"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Título
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], 
+                                 fontSize=20, textColor=colors.HexColor('#1a5490'), 
+                                 spaceAfter=20, alignment=TA_CENTER)
+    
+    elements.append(Paragraph("ESCUELA MARIANO ESCOBEDO", title_style))
+    elements.append(Paragraph("Boleta de Calificaciones", styles['Heading2']))
+    elements.append(Spacer(1, 20))
+    
+    # Info del alumno
+    info = f"<b>Alumno:</b> {alumno.nombre_completo}<br/><b>Grado:</b> {alumno.grado_grupo}<br/><b>Período:</b> {periodo}<br/><b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y')}"
+    elements.append(Paragraph(info, styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
+    # Tabla de calificaciones
+    data = [['Criterio de Evaluación', 'Calificación']]
+    for criterio, nota in datos_evaluacion.items():
+        data.append([criterio.replace('_', ' ').title(), str(nota)])
+    data.append(['', ''])
+    data.append([Paragraph('<b>PROMEDIO GENERAL</b>', styles['Normal']), 
+                 Paragraph(f'<b>{promedio}</b>', styles['Normal'])])
+    
+    tabla = Table(data, colWidths=[4*inch, 2*inch])
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -2), 1, colors.black),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8f4f8')),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+    ]))
+    elements.append(tabla)
+    elements.append(Spacer(1, 30))
+    
+    # Observaciones
+    if observaciones:
+        elements.append(Paragraph("<b>Observaciones:</b>", styles['Heading3']))
+        elements.append(Paragraph(observaciones, styles['Normal']))
+        elements.append(Spacer(1, 20))
+    
+    # Firmas
+    elements.append(Spacer(1, 40))
+    firma_tabla = Table([['_________________________', '_________________________'],
+                        ['Firma del Profesor', 'Firma del Padre/Tutor']], 
+                       colWidths=[3*inch, 3*inch])
+    firma_tabla.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
+    elements.append(firma_tabla)
+    
+    # Generar PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Nombre y guardar
+    filename = f"boleta_{alumno.grado_grupo}_{alumno.nombre_completo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    file_url = None
+    
+    # Intentar S3
+    if S3_ENDPOINT and S3_KEY and S3_SECRET:
+        try:
+            s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, aws_access_key_id=S3_KEY, 
+                            aws_secret_access_key=S3_SECRET, region_name='us-west-1')
+            s3_key = f"boletas/{filename}"
+            s3.upload_fileobj(BytesIO(buffer.getvalue()), S3_BUCKET, s3_key)
+            file_url = s3_key
+            print(f"✅ Boleta guardada en iDrive e2: {filename}")
+        except Exception as e:
+            print(f"⚠️ Error S3: {e}")
+    
+    # Respaldo local
+    os.makedirs(os.path.join(UPLOAD_FOLDER, 'boletas'), exist_ok=True)
+    with open(os.path.join(UPLOAD_FOLDER, 'boletas', filename), 'wb') as f:
+        f.write(buffer.getvalue())
+    
+    buffer.seek(0)
+    return (file_url or f"boletas/{filename}", buffer, filename)
 
 # --- RUTAS PRINCIPALES ---
 
@@ -1733,6 +1834,7 @@ def generar_boleta():
         promedio = 0
         total_puntos = 0
         conteo = 0
+        periodo = request.form.get('periodo', 'Sin especificar')
         
         for key, value in request.form.items():
             if key.startswith('nota_'):
@@ -1744,13 +1846,44 @@ def generar_boleta():
         
         if conteo > 0:
             promedio = round(total_puntos / conteo, 1)
+        
+        try:
+            # 🆕 GENERAR Y GUARDAR EL PDF
+            file_url, buffer_pdf, nombre_archivo = generar_pdf_boleta(
+                alumno, 
+                datos_evaluacion, 
+                request.form.get('observaciones'),
+                promedio,
+                periodo
+            )
             
-        return render_template('admin/boleta_imprimir.html', 
-                             alumno=alumno, 
-                             evaluacion=datos_evaluacion, 
-                             observaciones=request.form.get('observaciones'),
-                             promedio=promedio,
-                             fecha=datetime.now())
+            # 🆕 REGISTRAR EN LA BASE DE DATOS
+            nueva_boleta = BoletaGenerada(
+                alumno_id=alumno.id,
+                archivo_url=file_url,
+                nombre_archivo=nombre_archivo,
+                periodo=periodo,
+                promedio=promedio,
+                observaciones=request.form.get('observaciones'),
+                generado_por=session.get('user', 'Sistema')
+            )
+            db.session.add(nueva_boleta)
+            db.session.commit()
+            
+            flash('✅ Boleta generada y guardada correctamente', 'success')
+            
+            # 🆕 DESCARGAR el PDF directamente
+            return send_file(
+                buffer_pdf,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=nombre_archivo
+            )
+            
+        except Exception as e:
+            print(f"❌ Error al generar boleta: {str(e)}")
+            flash(f'Error al generar boleta: {str(e)}', 'danger')
+            return redirect(url_for('generar_boleta'))
 
     # Pasamos 'filtro_actual' al HTML para mantener el select en su lugar
     return render_template('admin/boleta_form.html', 
@@ -1758,6 +1891,113 @@ def generar_boleta():
                          alumno_seleccionado=alumno, 
                          criterios=criterios,
                          filtro_actual=filtro_grado)
+
+# --- VER BOLETAS GENERADAS ---
+@app.route('/admin/boletas/historial')
+def ver_boletas_historial():
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    # Obtener filtros
+    filtro_grado = request.args.get('grado', 'Todos')
+    filtro_periodo = request.args.get('periodo', '')
+    
+    # Query base con join para obtener datos del alumno
+    query = BoletaGenerada.query.join(UsuarioAlumno)
+    
+    # Aplicar filtro de grado
+    if filtro_grado and filtro_grado != 'Todos':
+        query = query.filter(UsuarioAlumno.grado_grupo == filtro_grado)
+    
+    # Aplicar filtro de período
+    if filtro_periodo:
+        query = query.filter(BoletaGenerada.periodo.contains(filtro_periodo))
+    
+    # Ordenar por fecha (más reciente primero)
+    boletas = query.order_by(BoletaGenerada.fecha_generacion.desc()).all()
+    
+    # Obtener lista de grupos únicos
+    grupos_disponibles = db.session.query(UsuarioAlumno.grado_grupo).distinct().all()
+    grupos_disponibles = sorted([g[0] for g in grupos_disponibles])
+    
+    # Estadísticas
+    total_boletas = BoletaGenerada.query.count()
+    boletas_este_mes = BoletaGenerada.query.filter(
+        BoletaGenerada.fecha_generacion >= date.today().replace(day=1)
+    ).count()
+    
+    return render_template('admin/boletas_historial.html',
+                         boletas=boletas,
+                         grupos_disponibles=grupos_disponibles,
+                         filtro_grado=filtro_grado,
+                         filtro_periodo=filtro_periodo,
+                         total_boletas=total_boletas,
+                         boletas_este_mes=boletas_este_mes)
+
+@app.route('/admin/boletas/descargar/<int:boleta_id>')
+def descargar_boleta_guardada(boleta_id):
+    """Descargar una boleta previamente generada"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    boleta = BoletaGenerada.query.get_or_404(boleta_id)
+    
+    try:
+        # Si está en S3
+        if boleta.archivo_url and boleta.archivo_url.startswith('boletas/'):
+            if S3_ENDPOINT and S3_KEY and S3_SECRET:
+                file_stream, content_type = descargar_de_s3(boleta.archivo_url)
+                
+                if file_stream:
+                    return send_file(
+                        file_stream,
+                        mimetype='application/pdf',
+                        as_attachment=True,
+                        download_name=boleta.nombre_archivo
+                    )
+        
+        # Si está guardado localmente
+        return send_from_directory(
+            os.path.join(UPLOAD_FOLDER, 'boletas'),
+            boleta.nombre_archivo,
+            as_attachment=True
+        )
+        
+    except Exception as e:
+        flash(f'Error al descargar boleta: {str(e)}', 'danger')
+        return redirect(url_for('ver_boletas_historial'))
+
+@app.route('/admin/boletas/eliminar/<int:boleta_id>')
+def eliminar_boleta_guardada(boleta_id):
+    """Eliminar una boleta del registro"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    boleta = BoletaGenerada.query.get_or_404(boleta_id)
+    
+    try:
+        # Opcionalmente eliminar de S3
+        if boleta.archivo_url and boleta.archivo_url.startswith('boletas/') and S3_ENDPOINT and S3_KEY and S3_SECRET:
+            try:
+                s3 = boto3.client('s3',
+                                endpoint_url=S3_ENDPOINT,
+                                aws_access_key_id=S3_KEY,
+                                aws_secret_access_key=S3_SECRET,
+                                region_name='us-west-1')
+                s3.delete_object(Bucket=S3_BUCKET, Key=boleta.archivo_url)
+                print(f"🗑️ Boleta eliminada de S3: {boleta.archivo_url}")
+            except Exception as e:
+                print(f"⚠️ No se pudo eliminar de S3: {e}")
+        
+        # Eliminar registro de la base de datos
+        db.session.delete(boleta)
+        db.session.commit()
+        flash('Boleta eliminada correctamente', 'success')
+        
+    except Exception as e:
+        flash(f'Error al eliminar boleta: {str(e)}', 'danger')
+    
+    return redirect(url_for('ver_boletas_historial'))
 
 # --- INICIALIZADOR ---
 

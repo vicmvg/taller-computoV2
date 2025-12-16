@@ -27,6 +27,13 @@ TOKEN_MAESTRO = "treceT1gres"
 # NUEVO: La sesión expira tras 10 minutos de inactividad
 app.permanent_session_lifetime = timedelta(minutes=10)
 
+# 🆕 RENOVAR SESIÓN EN CADA REQUEST
+@app.before_request
+def renovar_sesion():
+    """Marca la sesión como permanente y la renueva en cada petición"""
+    session.permanent = True
+    session.modified = True
+
 # --- CONFIGURACIÓN DE BASE DE DATOS ---
 
 # Obtener la URL de la variable de entorno
@@ -992,7 +999,6 @@ def eliminar_alumno(id):
     
     alumno = UsuarioAlumno.query.get_or_404(id)
     nombre = alumno.nombre_completo
-    
     db.session.delete(alumno)
     db.session.commit()
     

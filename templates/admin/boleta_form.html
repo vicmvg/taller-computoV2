@@ -1,50 +1,101 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="container py-4">
-    <div class="glass-card mb-4">
-        <h4 class="fw-bold"><i class="fas fa-file-signature me-2"></i>Generar Boleta</h4>
+    
+    <div class="glass-card mb-4 border-top border-4 border-primary">
+        <h4 class="fw-bold mb-3"><i class="fas fa-file-signature me-2"></i>Generar Boleta</h4>
         
-        <form action="{{ url_for('generar_boleta') }}" method="GET" class="d-flex gap-2 mt-3">
-            <select name="alumno_id" class="form-select w-auto fw-bold" onchange="this.form.submit()">
-                <option value="" disabled selected>Selecciona un alumno...</option>
-                {% for a in alumnos %}
-                <option value="{{ a.id }}" {% if alumno_seleccionado and alumno_seleccionado.id == a.id %}selected{% endif %}>
-                    {{ a.grado_grupo }} - {{ a.nombre_completo }}
-                </option>
-                {% endfor %}
-            </select>
-        </form>
+        <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <form action="{{ url_for('generar_boleta') }}" method="GET">
+                    <label class="small fw-bold text-muted mb-1">1. Primero elige el Grupo</label>
+                    <select name="filtro_grado" class="form-select fw-bold bg-light" onchange="this.form.submit()">
+                        <option value="Todos">Ver Todos</option>
+                        {% for g in range(1, 7) %}
+                            {% for l in ['A', 'B', 'C'] %}
+                                <option value="{{ g }}{{ l }}" {% if filtro_actual == (g|string + l) %}selected{% endif %}>
+                                    {{ g }}° {{ l }}
+                                </option>
+                            {% endfor %}
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+
+            <div class="col-md-5">
+                <form action="{{ url_for('generar_boleta') }}" method="GET">
+                    <input type="hidden" name="filtro_grado" value="{{ filtro_actual }}">
+                    
+                    <label class="small fw-bold text-muted mb-1">2. Ahora selecciona al Alumno</label>
+                    <select name="alumno_id" class="form-select fw-bold border-primary" onchange="this.form.submit()">
+                        <option value="" disabled selected>
+                            {% if not alumnos %}
+                                No hay alumnos en este grupo
+                            {% else %}
+                                Seleccionar alumno de la lista...
+                            {% endif %}
+                        </option>
+                        
+                        {% for a in alumnos %}
+                        <option value="{{ a.id }}" {% if alumno_seleccionado and alumno_seleccionado.id == a.id %}selected{% endif %}>
+                            {{ a.nombre_completo }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+            
+            <div class="col-md-4 text-muted small d-flex align-items-center">
+                {% if filtro_actual and filtro_actual != 'Todos' %}
+                    <i class="fas fa-info-circle me-2"></i> Mostrando {{ alumnos|length }} alumnos de {{ filtro_actual }}
+                {% endif %}
+            </div>
+        </div>
     </div>
 
     {% if alumno_seleccionado %}
-    <div class="glass-card border-top border-4 border-primary">
-        <h5 class="fw-bold mb-3">Evaluando a: <span class="text-primary">{{ alumno_seleccionado.nombre_completo }}</span></h5>
+    <div class="glass-card">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h5 class="fw-bold mb-0">Evaluando a: <span class="text-primary">{{ alumno_seleccionado.nombre_completo }}</span></h5>
+            <span class="badge bg-secondary">{{ alumno_seleccionado.grado_grupo }}</span>
+        </div>
         
         <form method="POST">
             <div class="row g-3 mb-4">
                 {% for crit in criterios %}
                 <div class="col-md-4">
-                    <label class="form-label small fw-bold">{{ crit.nombre }} (0-10)</label>
-                    <input type="number" step="0.1" max="10" name="nota_{{ crit.nombre }}" class="form-control" required>
+                    <label class="form-label small fw-bold text-uppercase">{{ crit.nombre }}</label>
+                    <div class="input-group">
+                        <input type="number" step="0.1" min="0" max="10" name="nota_{{ crit.nombre }}" class="form-control fw-bold" placeholder="0-10" required>
+                        <span class="input-group-text text-muted">/10</span>
+                    </div>
                 </div>
                 {% else %}
-                <div class="alert alert-warning">
-                    No has configurado criterios para {{ alumno_seleccionado.grado_grupo[0] }}° Grado. 
-                    <a href="{{ url_for('configurar_boletas') }}">Configurar ahora</a>.
+                <div class="col-12">
+                    <div class="alert alert-warning border-start border-4 border-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        No has configurado qué evaluar para <strong>{{ alumno_seleccionado.grado_grupo[0] }}° Grado</strong>.
+                        <a href="{{ url_for('configurar_boletas') }}" class="alert-link">Ir a Configurar ahora</a>.
+                    </div>
                 </div>
                 {% endfor %}
             </div>
 
-            <div class="mb-3">
-                <label class="fw-bold">Retroalimentación / Observaciones</label>
-                <textarea name="observaciones" class="form-control" rows="4" placeholder="Escribe aquí tus comentarios para el alumno..."></textarea>
+            {% if criterios %}
+            <div class="mb-4">
+                <label class="fw-bold mb-2">Retroalimentación / Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="4" placeholder="Ej: Excelente desempeño en clase, falta reforzar..."></textarea>
             </div>
 
-            <button type="submit" class="btn btn-success fw-bold px-5">
-                <i class="fas fa-print me-2"></i>Generar Vista de Impresión
-            </button>
+            <div class="text-end">
+                <button type="submit" class="btn btn-success fw-bold px-5 py-2 hover-lift shadow">
+                    <i class="fas fa-print me-2"></i>Generar Documento
+                </button>
+            </div>
+            {% endif %}
         </form>
     </div>
     {% endif %}
+
 </div>
 {% endblock %}

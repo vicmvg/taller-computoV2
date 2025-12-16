@@ -781,8 +781,9 @@ def admin_dashboard():
                          alumnos_activos=alumnos_activos,
                          total_entregas=total_entregas,
                          chat_activo=chat_activo)
-       # ruta temporal                  
-   @app.route('/admin/migrar-bd-fotos')
+
+# ruta temporal                  
+@app.route('/admin/migrar-bd-fotos')
 def migrar_bd_fotos():
     """Ruta temporal para agregar columna foto_perfil a usuario_alumno"""
     if 'user' not in session or session.get('tipo_usuario') != 'profesor':
@@ -818,10 +819,8 @@ def migrar_bd_fotos():
         import traceback
         traceback.print_exc()
     
-    return redirect(url_for('admin_dashboard'))                      
-
+    return redirect(url_for('admin_dashboard'))
 # --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
-
 # 1. INTERRUPTOR DEL PROFE
 @app.route('/admin/chat/toggle')
 def toggle_chat():

@@ -183,7 +183,38 @@
                                 {% endif %}
                             </div>
                             <div class="col-md-4 text-end">
-                                <i class="bi bi-person-circle" style="font-size: 5rem; opacity: 0.8;"></i>
+                                <!-- 🆕 FOTO DE PERFIL GRANDE EN EL HEADER -->
+                                {% if alumno.foto_perfil %}
+                                <div class="position-relative d-inline-block">
+                                    <img src="{{ url_for('ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                                         alt="Foto de perfil"
+                                         class="rounded-circle border border-4 border-white shadow"
+                                         style="width: 120px; height: 120px; object-fit: cover; cursor: pointer;"
+                                         data-bs-toggle="modal" 
+                                         data-bs-target="#modalFotoPerfil">
+                                    <button class="btn btn-sm btn-light rounded-circle position-absolute bottom-0 end-0 shadow" 
+                                            style="width: 35px; height: 35px;"
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#modalFotoPerfil">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </div>
+                                {% else %}
+                                <div class="position-relative d-inline-block">
+                                    <div class="rounded-circle bg-white d-flex align-items-center justify-content-center shadow" 
+                                         style="width: 120px; height: 120px; color: #667eea; font-weight: bold; font-size: 3em; cursor: pointer;"
+                                         data-bs-toggle="modal" 
+                                         data-bs-target="#modalFotoPerfil">
+                                        {{ session.alumno_nombre[0] }}
+                                    </div>
+                                    <button class="btn btn-sm btn-primary rounded-circle position-absolute bottom-0 end-0 shadow" 
+                                            style="width: 35px; height: 35px;"
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#modalFotoPerfil">
+                                        <i class="bi bi-plus"></i>
+                                    </button>
+                                </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>

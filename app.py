@@ -781,6 +781,44 @@ def admin_dashboard():
                          alumnos_activos=alumnos_activos,
                          total_entregas=total_entregas,
                          chat_activo=chat_activo)
+       # ruta temporal                  
+   @app.route('/admin/migrar-bd-fotos')
+def migrar_bd_fotos():
+    """Ruta temporal para agregar columna foto_perfil a usuario_alumno"""
+    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+        return redirect(url_for('login'))
+    
+    try:
+        # Agregar la columna si no existe
+        with db.engine.connect() as conn:
+            # Verificar si la columna ya existe
+            result = conn.execute(db.text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='usuario_alumno' 
+                AND column_name='foto_perfil'
+            """))
+            
+            if result.fetchone() is None:
+                # La columna no existe, agregarla
+                conn.execute(db.text("""
+                    ALTER TABLE usuario_alumno 
+                    ADD COLUMN foto_perfil VARCHAR(300)
+                """))
+                conn.commit()
+                flash('✅ Migración exitosa: Columna foto_perfil agregada a la tabla usuario_alumno', 'success')
+                print("✅ Columna foto_perfil agregada correctamente")
+            else:
+                flash('⚠️ La columna foto_perfil ya existe en la base de datos', 'info')
+                print("⚠️ Columna foto_perfil ya existe")
+                
+    except Exception as e:
+        flash(f'❌ Error al migrar base de datos: {str(e)}', 'danger')
+        print(f"❌ Error en migración: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
+    return redirect(url_for('admin_dashboard'))                      
 
 # --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
 

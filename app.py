@@ -99,6 +99,9 @@ class UsuarioAlumno(db.Model):
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
     activo = db.Column(db.Boolean, default=True)
     
+    # 🆕 NUEVO CAMPO PARA FOTO DE PERFIL
+    foto_perfil = db.Column(db.String(300), nullable=True, default=None)
+    
     # Relación con entregas
     entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True)
 
@@ -712,6 +715,48 @@ def logout_alumnos():
     session.pop('alumno_username', None)
     session.pop('tipo_usuario', None)
     return redirect(url_for('index'))
+
+# --- RUTA PARA SUBIR FOTO DE PERFIL (ALUMNO) ---
+
+@app.route('/alumnos/perfil/foto', methods=['POST'])
+def actualizar_foto_perfil():
+    """Permite al alumno subir/cambiar su foto de perfil"""
+    if 'alumno_id' not in session or session.get('tipo_usuario') != 'alumno':
+        return redirect(url_for('login_alumnos'))
+    
+    if 'foto' not in request.files:
+        flash('No se seleccionó ninguna foto', 'danger')
+        return redirect(url_for('panel_alumnos'))
+    
+    foto = request.files['foto']
+    
+    if foto.filename == '':
+        flash('No se seleccionó ninguna foto', 'danger')
+        return redirect(url_for('panel_alumnos'))
+    
+    # Validar que sea una imagen
+    extensiones_permitidas = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    extension = foto.filename.rsplit('.', 1)[1].lower() if '.' in foto.filename else ''
+    
+    if extension not in extensiones_permitidas:
+        flash('Solo se permiten imágenes (PNG, JPG, JPEG, GIF, WEBP)', 'danger')
+        return redirect(url_for('panel_alumnos'))
+    
+    try:
+        # Guardar foto (usa la misma función que para tareas)
+        ruta_foto, es_s3 = guardar_archivo(foto)
+        
+        # Actualizar en la base de datos
+        alumno = UsuarioAlumno.query.get(session['alumno_id'])
+        alumno.foto_perfil = ruta_foto
+        db.session.commit()
+        
+        flash('¡Foto de perfil actualizada correctamente! 🎉', 'success')
+        
+    except Exception as e:
+        flash(f'Error al subir la foto: {str(e)}', 'danger')
+    
+    return redirect(url_for('panel_alumnos'))
 
 # --- RUTAS DE ADMINISTRACIÓN ---
 

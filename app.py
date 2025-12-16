@@ -1698,7 +1698,7 @@ def borrar_criterio(id):
     db.session.commit()
     return redirect(url_for('configurar_boletas'))
 
-# 2. GENERADOR DE BOLETA (Formulario de llenado)
+# --- GENERADOR DE BOLETA CON FILTRO ---
 @app.route('/admin/boletas/generar', methods=['GET', 'POST'])
 def generar_boleta():
     if 'user' not in session: return redirect(url_for('login'))
@@ -1706,22 +1706,34 @@ def generar_boleta():
     alumno = None
     criterios = []
     
-    # Si recibimos un ID de alumno, cargamos sus datos y los criterios de su grado
+    # 1. NUEVO: Obtener el filtro de grupo (Ej: "6A")
+    filtro_grado = request.args.get('filtro_grado')
+    
+    # 2. Query Base: Preparamos la consulta de alumnos
+    query = UsuarioAlumno.query
+    
+    # Si hay filtro, recortamos la lista
+    if filtro_grado and filtro_grado != 'Todos':
+        query = query.filter_by(grado_grupo=filtro_grado)
+    
+    # Obtenemos los alumnos (ya sea todos o solo los del grupo filtrado)
+    alumnos = query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+
+    # 3. Lógica de Selección de Alumno (Igual que antes)
     alumno_id = request.args.get('alumno_id')
     if alumno_id:
         alumno = UsuarioAlumno.query.get_or_404(alumno_id)
-        # Extraemos solo el número del grado (Ej: "6A" -> "6")
+        # Extraer grado numérico para buscar criterios
         grado_num = ''.join(filter(str.isdigit, alumno.grado_grupo))
         criterios = CriterioBoleta.query.filter_by(grado=grado_num).all()
 
-    # Si enviamos el formulario lleno (POST), mostramos la boleta final
+    # 4. Lógica de Generación (POST) - Cuando le das a "Generar"
     if request.method == 'POST':
         datos_evaluacion = {}
         promedio = 0
         total_puntos = 0
         conteo = 0
         
-        # Recolectamos las calificaciones del form
         for key, value in request.form.items():
             if key.startswith('nota_'):
                 criterio_nombre = key.replace('nota_', '')
@@ -1740,9 +1752,12 @@ def generar_boleta():
                              promedio=promedio,
                              fecha=datetime.now())
 
-    # Vista inicial: Buscador de alumnos
-    alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
-    return render_template('admin/boleta_form.html', alumnos=alumnos, alumno_seleccionado=alumno, criterios=criterios)
+    # Pasamos 'filtro_actual' al HTML para mantener el select en su lugar
+    return render_template('admin/boleta_form.html', 
+                         alumnos=alumnos, 
+                         alumno_seleccionado=alumno, 
+                         criterios=criterios,
+                         filtro_actual=filtro_grado)
 
 # --- INICIALIZADOR ---
 

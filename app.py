@@ -230,6 +230,51 @@ class BoletaGenerada(db.Model):
 
 # --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
 
+def get_current_user():
+    """
+    Retorna (tipo_usuario, id, datos) o None
+    Centraliza la verificación de sesión para mayor seguridad
+    """
+    if 'tipo_usuario' not in session:
+        return None
+    
+    if session['tipo_usuario'] == 'profesor':
+        return ('profesor', session.get('user'), {'username': session.get('user')})
+    elif session['tipo_usuario'] == 'alumno':
+        return ('alumno', session.get('alumno_id'), {
+            'id': session.get('alumno_id'),
+            'nombre': session.get('alumno_nombre'),
+            'grado': session.get('alumno_grado'),
+            'username': session.get('alumno_username')
+        })
+    return None
+
+def column_exists(table_name, column_name):
+    """
+    Verifica si una columna existe en una tabla de forma segura
+    Usa SQLAlchemy metadata en lugar de consultas SQL directas
+    """
+    from sqlalchemy import inspect
+    inspector = inspect(db.engine)
+    columns = inspector.get_columns(table_name)
+    return any(col['name'] == column_name for col in columns)
+
+def migrar_bd_fotos():
+    """
+    Migración segura para agregar columna foto_perfil si no existe
+    """
+    try:
+        if not column_exists('usuario_alumno', 'foto_perfil'):
+            print("🔧 Migrando BD: Agregando columna 'foto_perfil'...")
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE usuario_alumno ADD COLUMN foto_perfil VARCHAR(300)"))
+                conn.commit()
+            print("✅ Migración completada: columna 'foto_perfil' agregada")
+        else:
+            print("✅ Columna 'foto_perfil' ya existe")
+    except Exception as e:
+        print(f"⚠️ Error en migración: {str(e)}")
+
 def descargar_de_s3(s3_key):
     """
     Descarga un archivo desde iDrive e2 y lo retorna como BytesIO
@@ -615,7 +660,8 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     # Si ya está logueado, mandar al dashboard
-    if 'user' in session and session.get('tipo_usuario') == 'profesor':
+    user_info = get_current_user()
+    if user_info and user_info[0] == 'profesor':
         return redirect(url_for('admin_dashboard'))
 
     if request.method == 'POST':
@@ -686,7 +732,8 @@ def recuperar_acceso():
 @app.route('/alumnos/login', methods=['GET', 'POST'])
 def login_alumnos():
     # Si ya entró, lo mandamos directo al panel
-    if 'alumno_id' in session:
+    user_info = get_current_user()
+    if user_info and user_info[0] == 'alumno':
         return redirect(url_for('panel_alumnos'))
 
     if request.method == 'POST':
@@ -728,7 +775,8 @@ def logout_alumnos():
 @app.route('/alumnos/perfil/foto', methods=['POST'])
 def actualizar_foto_perfil():
     """Permite al alumno subir/cambiar su foto de perfil"""
-    if 'alumno_id' not in session or session.get('tipo_usuario') != 'alumno':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'alumno':
         return redirect(url_for('login_alumnos'))
     
     if 'foto' not in request.files:
@@ -769,8 +817,9 @@ def actualizar_foto_perfil():
 
 @app.route('/admin')
 def admin_dashboard():
-    # VERIFICACIÓN DE SEGURIDAD: Si no está logueado como profesor, mandar al login
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    # VERIFICACIÓN DE SEGURIDAD usando la función helper
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
 
     equipos = Equipo.query.count()
@@ -789,49 +838,12 @@ def admin_dashboard():
                          total_entregas=total_entregas,
                          chat_activo=chat_activo)
 
-# ruta temporal                  
-@app.route('/admin/migrar-bd-fotos')
-def migrar_bd_fotos():
-    """Ruta temporal para agregar columna foto_perfil a usuario_alumno"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
-        return redirect(url_for('login'))
-    
-    try:
-        # Agregar la columna si no existe
-        with db.engine.connect() as conn:
-            # Verificar si la columna ya existe
-            result = conn.execute(db.text("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name='usuario_alumno' 
-                AND column_name='foto_perfil'
-            """))
-            
-            if result.fetchone() is None:
-                # La columna no existe, agregarla
-                conn.execute(db.text("""
-                    ALTER TABLE usuario_alumno 
-                    ADD COLUMN foto_perfil VARCHAR(300)
-                """))
-                conn.commit()
-                flash('✅ Migración exitosa: Columna foto_perfil agregada a la tabla usuario_alumno', 'success')
-                print("✅ Columna foto_perfil agregada correctamente")
-            else:
-                flash('⚠️ La columna foto_perfil ya existe en la base de datos', 'info')
-                print("⚠️ Columna foto_perfil ya existe")
-                
-    except Exception as e:
-        flash(f'❌ Error al migrar base de datos: {str(e)}', 'danger')
-        print(f"❌ Error en migración: {str(e)}")
-        import traceback
-        traceback.print_exc()
-    
-    return redirect(url_for('admin_dashboard'))
 # --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
 # 1. INTERRUPTOR DEL PROFE
 @app.route('/admin/chat/toggle')
 def toggle_chat():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Buscar la configuración, si no existe la creamos
@@ -854,7 +866,8 @@ def toggle_chat():
 # 2. ENVIAR MENSAJE (ALUMNO)
 @app.route('/api/chat/enviar', methods=['POST'])
 def enviar_mensaje():
-    if 'alumno_id' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'alumno':
         return {'status': 'error', 'msg': 'No logueado'}, 403
     
     # Verificar si el chat está activo
@@ -881,7 +894,8 @@ def enviar_mensaje():
 # 3. LEER MENSAJES (ALUMNO)
 @app.route('/api/chat/obtener')
 def obtener_mensajes():
-    if 'alumno_id' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'alumno':
         return {'status': 'error'}, 403
 
     # Obtener mensajes SOLO de mi grupo (últimos 50)
@@ -912,7 +926,8 @@ def obtener_mensajes():
 
 @app.route('/admin/alumnos')
 def gestionar_alumnos():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # 1. Capturar filtro
@@ -934,11 +949,12 @@ def gestionar_alumnos():
                          total_alumnos=total_alumnos,
                          alumnos_activos=alumnos_activos,
                          filtro_actual=filtro,
-                         fecha_hoy=date.today().isoformat())  # ← AGREGAR ESTA LÍNEA
+                         fecha_hoy=date.today().isoformat())
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 def agregar_alumno():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     username = request.form['username']
@@ -973,7 +989,8 @@ def agregar_alumno():
 
 @app.route('/admin/alumnos/editar/<int:id>', methods=['POST'])
 def editar_alumno(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     alumno = UsuarioAlumno.query.get_or_404(id)
@@ -994,7 +1011,8 @@ def editar_alumno(id):
 
 @app.route('/admin/alumnos/eliminar/<int:id>')
 def eliminar_alumno(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     alumno = UsuarioAlumno.query.get_or_404(id)
@@ -1007,7 +1025,8 @@ def eliminar_alumno(id):
 
 @app.route('/admin/asistencia/tomar', methods=['POST'])
 def tomar_asistencia():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Recibimos la fecha del formulario (o usamos hoy)
@@ -1036,7 +1055,8 @@ def tomar_asistencia():
 
 @app.route('/admin/reporte-asistencia/<grupo>')
 def generar_reporte_asistencia(grupo):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Obtener fechas del reporte
@@ -1069,7 +1089,8 @@ def generar_reporte_asistencia(grupo):
 @app.route('/admin/descargar-reporte/<path:filename>')
 def descargar_reporte(filename):
     """Ruta alternativa para descargar reportes guardados localmente"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     try:
@@ -1084,7 +1105,8 @@ def descargar_reporte(filename):
 
 @app.route('/admin/alumnos/entregas')
 def ver_entregas_alumnos():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Obtener todas las entregas ordenadas por fecha
@@ -1103,7 +1125,8 @@ def ver_entregas_alumnos():
 
 @app.route('/admin/alumnos/calificar/<int:id>', methods=['POST'])
 def calificar_entrega(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     entrega = EntregaAlumno.query.get_or_404(id)
@@ -1120,7 +1143,8 @@ def calificar_entrega(id):
 @app.route('/admin/reportes-asistencia')
 def ver_reportes_asistencia():
     """Página para ver todos los reportes generados con filtros"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Obtener filtros
@@ -1180,7 +1204,8 @@ def ver_reportes_asistencia():
 @app.route('/admin/descargar-reporte/<int:reporte_id>')
 def descargar_reporte_guardado(reporte_id):
     """Descargar un reporte previamente generado"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
@@ -1223,7 +1248,8 @@ def descargar_reporte_guardado(reporte_id):
 @app.route('/admin/eliminar-reporte/<int:reporte_id>')
 def eliminar_reporte(reporte_id):
     """Eliminar un reporte del registro (no borra el archivo físico)"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
@@ -1257,7 +1283,8 @@ def eliminar_reporte(reporte_id):
 
 @app.route('/alumnos')
 def panel_alumnos():
-    if 'alumno_id' not in session or session.get('tipo_usuario') != 'alumno':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'alumno':
         return redirect(url_for('login_alumnos'))
     
     alumno = UsuarioAlumno.query.get(session['alumno_id'])
@@ -1288,8 +1315,9 @@ def panel_alumnos():
 
 @app.route('/alumnos/subir', methods=['POST'])
 def subir_tarea():
-    # SEGURIDAD: Verificar que esté logueado como alumno
-    if 'alumno_id' not in session or session.get('tipo_usuario') != 'alumno':
+    # SEGURIDAD: Verificar que esté logueado como alumno usando la función helper
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'alumno':
         return redirect(url_for('login_alumnos'))
     
     if 'archivo' not in request.files:
@@ -1325,7 +1353,8 @@ def subir_tarea():
 
 @app.route('/admin/inventario')
 def inventario():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
         
     # Obtener todos los equipos ordenados por ID
@@ -1334,7 +1363,8 @@ def inventario():
 
 @app.route('/admin/inventario/agregar', methods=['POST'])
 def agregar_equipo():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     nuevo_equipo = Equipo(
@@ -1352,7 +1382,8 @@ def agregar_equipo():
 
 @app.route('/admin/inventario/eliminar/<int:id>')
 def eliminar_equipo(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
         
     equipo = Equipo.query.get_or_404(id)
@@ -1363,8 +1394,9 @@ def eliminar_equipo(id):
 
 @app.route('/admin/generar_qr/<int:id>')
 def generar_qr(id):
-    # VERIFICACIÓN DE SEGURIDAD
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    # VERIFICACIÓN DE SEGURIDAD usando la función helper
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Lógica simple para generar QR en memoria (o guardar imagen)
@@ -1374,7 +1406,8 @@ def generar_qr(id):
 
 @app.route('/admin/generar_qr_img/<int:id>')
 def generar_qr_img(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
 
     equipo = Equipo.query.get_or_404(id)
@@ -1399,7 +1432,8 @@ def generar_qr_img(id):
 
 @app.route('/admin/mantenimiento')
 def mantenimiento():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
         
     # Obtener reportes activos (sin reparar) y el historial (reparados)
@@ -1413,7 +1447,8 @@ def mantenimiento():
 
 @app.route('/admin/mantenimiento/reportar', methods=['POST'])
 def reportar_falla():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     equipo_id = request.form['equipo_id']
@@ -1433,7 +1468,8 @@ def reportar_falla():
 
 @app.route('/admin/mantenimiento/solucionar', methods=['POST'])
 def solucionar_falla():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
         
     reporte_id = request.form['reporte_id']
@@ -1455,7 +1491,8 @@ def solucionar_falla():
 
 @app.route('/admin/anuncios')
 def gestionar_anuncios():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Ordenar por fecha, el más nuevo arriba
@@ -1464,7 +1501,8 @@ def gestionar_anuncios():
 
 @app.route('/admin/anuncios/publicar', methods=['POST'])
 def publicar_anuncio():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     titulo = request.form['titulo']
@@ -1479,7 +1517,8 @@ def publicar_anuncio():
 
 @app.route('/admin/anuncios/eliminar/<int:id>')
 def eliminar_anuncio(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
         
     anuncio = Anuncio.query.get_or_404(id)
@@ -1492,7 +1531,8 @@ def eliminar_anuncio(id):
 
 @app.route('/admin/cuestionarios')
 def gestionar_cuestionarios():
-    if 'user' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     # Mostrar todos
     cuestionarios = Cuestionario.query.order_by(Cuestionario.fecha.desc()).all()
@@ -1500,7 +1540,8 @@ def gestionar_cuestionarios():
 
 @app.route('/admin/cuestionarios/publicar', methods=['POST'])
 def publicar_cuestionario():
-    if 'user' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # NUEVA LÓGICA: El examen va para un grupo específico
@@ -1520,7 +1561,8 @@ def publicar_cuestionario():
 
 @app.route('/admin/cuestionarios/eliminar/<int:id>')
 def eliminar_cuestionario(id):
-    if 'user' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     item = Cuestionario.query.get_or_404(id)
@@ -1533,7 +1575,8 @@ def eliminar_cuestionario(id):
 
 @app.route('/admin/banco')
 def gestionar_banco():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Ordenar por fecha de creación
@@ -1542,7 +1585,9 @@ def gestionar_banco():
 
 @app.route('/admin/banco/agregar', methods=['POST'])
 def agregar_al_banco():
-    if 'user' not in session: return redirect(url_for('login'))
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
+        return redirect(url_for('login'))
     
     nuevo = BancoCuestionario(
         titulo=request.form['titulo'],
@@ -1555,7 +1600,9 @@ def agregar_al_banco():
 
 @app.route('/admin/banco/eliminar/<int:id>')
 def eliminar_del_banco(id):
-    if 'user' not in session: return redirect(url_for('login'))
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
+        return redirect(url_for('login'))
     
     item = BancoCuestionario.query.get_or_404(id)
     db.session.delete(item)
@@ -1566,7 +1613,9 @@ def eliminar_del_banco(id):
 # --- LA MAGIA: ASIGNAR DESDE EL BANCO ---
 @app.route('/admin/banco/asignar', methods=['POST'])
 def asignar_desde_banco():
-    if 'user' not in session: return redirect(url_for('login'))
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
+        return redirect(url_for('login'))
     
     # 1. Obtenemos el ID de la plantilla y el grupo destino
     plantilla_id = request.form['plantilla_id']
@@ -1604,7 +1653,8 @@ def ver_grado(numero_grado):
 
 @app.route('/admin/grados', methods=['GET', 'POST'])
 def gestionar_grados():
-    if 'user' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
         
     if request.method == 'POST':
@@ -1640,7 +1690,8 @@ def gestionar_grados():
 
 @app.route('/admin/horarios')
 def gestionar_horarios():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     horarios = Horario.query.all()
@@ -1648,7 +1699,8 @@ def gestionar_horarios():
 
 @app.route('/admin/horarios/agregar', methods=['POST'])
 def agregar_horario():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     nuevo = Horario(
@@ -1663,7 +1715,8 @@ def agregar_horario():
 
 @app.route('/admin/horarios/eliminar/<int:id>')
 def eliminar_horario(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     horario = Horario.query.get_or_404(id)
@@ -1676,7 +1729,8 @@ def eliminar_horario(id):
 
 @app.route('/admin/plataformas')
 def gestionar_plataformas():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     plataformas = Plataforma.query.all()
@@ -1684,7 +1738,8 @@ def gestionar_plataformas():
 
 @app.route('/admin/plataformas/agregar', methods=['POST'])
 def agregar_plataforma():
-    if 'user' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     nueva = Plataforma(
@@ -1699,7 +1754,8 @@ def agregar_plataforma():
 
 @app.route('/admin/plataformas/eliminar/<int:id>')
 def eliminar_plataforma(id):
-    if 'user' not in session:
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     p = Plataforma.query.get_or_404(id)
@@ -1712,7 +1768,8 @@ def eliminar_plataforma(id):
 
 @app.route('/admin/entregas')
 def gestionar_entregas():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # 1. Capturamos el filtro de la URL (Ej: ?grado=6A)
@@ -1737,7 +1794,8 @@ def gestionar_entregas():
 
 @app.route('/admin/recursos')
 def gestionar_recursos():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Ordenamos: lo más nuevo primero
@@ -1746,7 +1804,8 @@ def gestionar_recursos():
 
 @app.route('/admin/recursos/subir', methods=['POST'])
 def subir_recurso():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     archivo = request.files.get('archivo')
@@ -1783,7 +1842,8 @@ def subir_recurso():
 
 @app.route('/admin/recursos/eliminar/<int:id>')
 def eliminar_recurso(id):
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     recurso = Recurso.query.get_or_404(id)
@@ -1865,7 +1925,9 @@ def ver_archivo(archivo_path):
 # 1. CONFIGURAR CRITERIOS (Qué evaluamos)
 @app.route('/admin/boletas/config', methods=['GET', 'POST'])
 def configurar_boletas():
-    if 'user' not in session: return redirect(url_for('login'))
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
+        return redirect(url_for('login'))
     
     if request.method == 'POST':
         grado = request.form['grado']
@@ -1881,7 +1943,9 @@ def configurar_boletas():
 
 @app.route('/admin/boletas/borrar-criterio/<int:id>')
 def borrar_criterio(id):
-    if 'user' not in session: return redirect(url_for('login'))
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
+        return redirect(url_for('login'))
     c = CriterioBoleta.query.get_or_404(id)
     db.session.delete(c)
     db.session.commit()
@@ -1890,7 +1954,9 @@ def borrar_criterio(id):
 # --- GENERADOR DE BOLETA CON FILTRO ---
 @app.route('/admin/boletas/generar', methods=['GET', 'POST'])
 def generar_boleta():
-    if 'user' not in session: return redirect(url_for('login'))
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
+        return redirect(url_for('login'))
     
     alumno = None
     criterios = []
@@ -1983,7 +2049,8 @@ def generar_boleta():
 # --- VER BOLETAS GENERADAS ---
 @app.route('/admin/boletas/historial')
 def ver_boletas_historial():
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     # Obtener filtros
@@ -2025,7 +2092,8 @@ def ver_boletas_historial():
 @app.route('/admin/boletas/descargar/<int:boleta_id>')
 def descargar_boleta_guardada(boleta_id):
     """Descargar una boleta previamente generada"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
@@ -2058,7 +2126,8 @@ def descargar_boleta_guardada(boleta_id):
 @app.route('/admin/boletas/eliminar/<int:boleta_id>')
 def eliminar_boleta_guardada(boleta_id):
     """Eliminar una boleta del registro"""
-    if 'user' not in session or session.get('tipo_usuario') != 'profesor':
+    user_info = get_current_user()
+    if not user_info or user_info[0] != 'profesor':
         return redirect(url_for('login'))
     
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
@@ -2093,6 +2162,8 @@ def eliminar_boleta_guardada(boleta_id):
 # Así Gunicorn lo leerá y creará las tablas en Neon al arrancar.
 with app.app_context():
     db.create_all()
+    # Ejecutar migración segura de fotos
+    migrar_bd_fotos()
 
 # Esto se queda solo para cuando pruebas en tu PC
 if __name__ == '__main__':

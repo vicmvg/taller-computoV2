@@ -1,14 +1,17 @@
+[file name]: app.py
+[file content begin]
 import os
 import boto3
 import qrcode
-import io  # Para manejar archivos en memoria
-import magic  # NUEVO: Para validación de archivos
+import io
+import magic
+import logging
 from datetime import datetime, timedelta, date
 from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps  # NUEVO: Para decoradores
+from functools import wraps
 
 # --- NUEVOS IMPORTS PARA GENERAR PDF ---
 from reportlab.lib.pagesizes import letter, A4
@@ -18,6 +21,10 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from io import BytesIO
+
+# --- CONFIGURACIÓN DE LOGGING ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- CONFIGURACIÓN INICIAL ---
 app = Flask(__name__)
@@ -36,6 +43,177 @@ ALLOWED_EXTENSIONS = {
     'archives': {'zip', 'rar', '7z'}
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+# --- CLASES AUXILIARES REFACTORIZADAS ---
+
+class AppError(Exception):
+    """Excepción base para errores de la aplicación"""
+    pass
+
+class FileValidationError(AppError):
+    """Error de validación de archivos"""
+    pass
+
+class S3UploadError(AppError):
+    """Error al subir archivos a S3"""
+    pass
+
+class S3Manager:
+    """Gestor centralizado para operaciones S3"""
+    
+    def __init__(self):
+        self.endpoint = os.environ.get('S3_ENDPOINT')
+        self.key = os.environ.get('S3_KEY')
+        self.secret = os.environ.get('S3_SECRET')
+        self.bucket = os.environ.get('S3_BUCKET_NAME', 'taller-computo')
+        self.is_configured = bool(self.endpoint and self.key and self.secret)
+        
+        logger.info(f"S3 Configurado: {self.is_configured}")
+        if self.is_configured:
+            logger.info(f"Bucket: {self.bucket}")
+    
+    def get_client(self):
+        """Obtener cliente S3 configurado"""
+        if not self.is_configured:
+            raise S3UploadError("S3 no está configurado")
+        
+        return boto3.client('s3',
+                          endpoint_url=self.endpoint,
+                          aws_access_key_id=self.key,
+                          aws_secret_access_key=self.secret,
+                          region_name='us-west-1')
+    
+    def upload_file(self, file_stream, key, content_type='application/octet-stream'):
+        """Subir archivo a S3"""
+        try:
+            client = self.get_client()
+            file_stream.seek(0)
+            client.upload_fileobj(
+                file_stream,
+                self.bucket,
+                key,
+                ExtraArgs={'ContentType': content_type}
+            )
+            logger.info(f"Archivo subido a S3: {key}")
+            return f"{self.endpoint}/{self.bucket}/{key}"
+        except Exception as e:
+            logger.error(f"Error S3 upload: {str(e)}")
+            raise S3UploadError(f"Error al subir a S3: {str(e)}")
+    
+    def download_file(self, key):
+        """Descargar archivo desde S3"""
+        try:
+            client = self.get_client()
+            s3_object = client.get_object(Bucket=self.bucket, Key=key)
+            file_content = s3_object['Body'].read()
+            content_type = s3_object.get('ContentType', 'application/octet-stream')
+            
+            logger.info(f"Archivo descargado de S3: {key}")
+            return BytesIO(file_content), content_type
+        except Exception as e:
+            logger.error(f"Error S3 download: {str(e)}")
+            raise S3UploadError(f"Error al descargar de S3: {str(e)}")
+    
+    def delete_file(self, key):
+        """Eliminar archivo de S3"""
+        try:
+            client = self.get_client()
+            client.delete_object(Bucket=self.bucket, Key=key)
+            logger.info(f"Archivo eliminado de S3: {key}")
+        except Exception as e:
+            logger.error(f"Error S3 delete: {str(e)}")
+            raise S3UploadError(f"Error al eliminar de S3: {str(e)}")
+
+class FileValidator:
+    """Validador de archivos centralizado"""
+    
+    def __init__(self):
+        self.max_size = MAX_FILE_SIZE
+        self.allowed_extensions = set().union(*ALLOWED_EXTENSIONS.values())
+        
+        # Mapeo de MIME types a extensiones permitidas
+        self.mime_to_ext = {
+            'image/png': 'png',
+            'image/jpeg': ['jpg', 'jpeg'],
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'image/bmp': 'bmp',
+            'application/pdf': 'pdf',
+            'application/msword': 'doc',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+            'application/vnd.ms-excel': 'xls',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/vnd.ms-powerpoint': 'ppt',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+            'text/plain': 'txt',
+            'application/zip': 'zip',
+            'application/x-rar-compressed': 'rar',
+            'application/x-7z-compressed': '7z',
+        }
+    
+    def validate(self, file_stream, filename):
+        """Validación exhaustiva de archivos"""
+        # 1. Verificar nombre del archivo
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise FileValidationError("Nombre de archivo inválido")
+        
+        # 2. Verificar extensión
+        ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+        if not ext:
+            raise FileValidationError("Archivo sin extensión")
+        
+        if ext not in self.allowed_extensions:
+            raise FileValidationError(f"Extensión .{ext} no permitida")
+        
+        # 3. Verificar tamaño
+        file_stream.seek(0, 2)
+        size = file_stream.tell()
+        file_stream.seek(0)
+        
+        if size > self.max_size:
+            raise FileValidationError(f"Archivo demasiado grande (máx {self.max_size/1024/1024}MB)")
+        
+        # 4. Verificar tipo real (magic number)
+        try:
+            file_content = file_stream.read(2048)
+            file_stream.seek(0)
+            
+            mime = magic.from_buffer(file_content, mime=True)
+            
+            if mime not in self.mime_to_ext:
+                raise FileValidationError(f"Tipo de archivo {mime} no permitido")
+            
+            # Verificar que extensión coincida con MIME real
+            expected_exts = self.mime_to_ext[mime]
+            if isinstance(expected_exts, list):
+                if ext not in expected_exts:
+                    raise FileValidationError(f"Extensión .{ext} no coincide con tipo real {mime}")
+            elif ext != expected_exts:
+                if mime == 'image/jpeg' and ext in ['jpg', 'jpeg']:
+                    pass  # jpg y jpeg son ambos JPEG
+                else:
+                    raise FileValidationError(f"Extensión .{ext} no coincide con tipo real {mime}")
+                    
+        except Exception as e:
+            logger.warning(f"Magic number validation skipped: {str(e)}")
+            # Si magic falla, continuamos con las validaciones básicas
+        
+        # 5. Validar contenido para archivos de texto
+        if ext in ['txt', 'pdf', 'doc', 'docx']:
+            try:
+                sample = file_stream.read(1024)
+                file_stream.seek(0)
+                
+                if b'\x00' in sample and ext == 'txt':
+                    raise FileValidationError("Archivo de texto contiene caracteres binarios")
+            except:
+                pass
+        
+        return True
+
+# --- INSTANCIAS GLOBALES ---
+s3_manager = S3Manager()
+file_validator = FileValidator()
 
 # --- DECORADORES DE SEGURIDAD MEJORADOS ---
 
@@ -95,35 +273,19 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# 2. Configuración de Archivos (S3 / Local)
-# Intenta leer credenciales de variables de entorno
-S3_ENDPOINT = os.environ.get('S3_ENDPOINT') 
-S3_KEY = os.environ.get('S3_KEY')
-S3_SECRET = os.environ.get('S3_SECRET')
-S3_BUCKET = os.environ.get('S3_BUCKET_NAME', 'taller-computo')
-
 # Carpeta local de respaldo si no hay S3
 UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Crea la carpeta si no existe
-
-# Debug: Imprimir configuración al iniciar
-print("=" * 50)
-print("CONFIGURACIÓN S3/iDrive e2:")
-print(f"S3_ENDPOINT: {S3_ENDPOINT}")
-print(f"S3_BUCKET: {S3_BUCKET}")
-print(f"S3_KEY configurado: {bool(S3_KEY)}")
-print(f"S3_SECRET configurado: {bool(S3_SECRET)}")
-print("=" * 50)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # --- MODELOS DE LA BASE DE DATOS ---
 
 class Equipo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    tipo = db.Column(db.String(50)) # PC, Monitor, Teclado, etc.
+    tipo = db.Column(db.String(50))
     marca = db.Column(db.String(50))
     modelo = db.Column(db.String(50))
-    estado = db.Column(db.String(20), default='Funcional') # Funcional, En Reparación, Baja
-    qr_data = db.Column(db.String(200)) # Url o texto del QR
+    estado = db.Column(db.String(20), default='Funcional')
+    qr_data = db.Column(db.String(200))
 
 class Mantenimiento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -132,8 +294,6 @@ class Mantenimiento(db.Model):
     fecha_reporte = db.Column(db.DateTime, default=datetime.utcnow)
     fecha_reparacion = db.Column(db.DateTime, nullable=True)
     solucion = db.Column(db.Text, nullable=True)
-    
-    # ESTA LÍNEA ES NUEVA: Nos permite acceder a los datos del equipo desde el reporte
     equipo = db.relationship('Equipo', backref=db.backref('mantenimientos', lazy=True))
 
 class Anuncio(db.Model):
@@ -144,17 +304,13 @@ class Anuncio(db.Model):
 
 class UsuarioAlumno(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)  # Ejemplo: 6AMatias2007
+    username = db.Column(db.String(50), unique=True, nullable=False)
     nombre_completo = db.Column(db.String(100), nullable=False)
-    grado_grupo = db.Column(db.String(20), nullable=False)  # Ejemplo: 6A
+    grado_grupo = db.Column(db.String(20), nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
     activo = db.Column(db.Boolean, default=True)
-    
-    # 🆕 NUEVO CAMPO PARA FOTO DE PERFIL
     foto_perfil = db.Column(db.String(300), nullable=True, default=None)
-    
-    # Relación con entregas
     entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True)
 
 class EntregaAlumno(db.Model):
@@ -162,118 +318,100 @@ class EntregaAlumno(db.Model):
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
-    archivo_url = db.Column(db.String(300)) # Ruta local o URL de S3
-    estrellas = db.Column(db.Integer, default=0) # Calificación 1-5
+    archivo_url = db.Column(db.String(300))
+    estrellas = db.Column(db.Integer, default=0)
     comentarios = db.Column(db.Text)
     fecha_entrega = db.Column(db.DateTime, default=datetime.utcnow)
 
-# --- NUEVO MODELO PARA ASISTENCIA ---
 class Asistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
     fecha = db.Column(db.Date, default=datetime.utcnow)
-    estado = db.Column(db.String(10)) # 'P'=Presente, 'F'=Falta, 'R'=Retardo, 'J'=Justificado
-    
-    # Relación para saber de quién es la asistencia
+    estado = db.Column(db.String(10))
     alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True))
 
-# --- MODELO PARA REGISTRO DE REPORTES GENERADOS ---
 class ReporteAsistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    grupo = db.Column(db.String(20), nullable=False)  # Ej: "6A"
+    grupo = db.Column(db.String(20), nullable=False)
     fecha_inicio = db.Column(db.Date, nullable=False)
-    fecha_fin = db.Column(db.Date, nullable=True)  # Puede ser None si es solo un día
+    fecha_fin = db.Column(db.Date, nullable=True)
     fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
-    archivo_url = db.Column(db.String(500))  # URL de S3 o ruta local
+    archivo_url = db.Column(db.String(500))
     nombre_archivo = db.Column(db.String(200))
-    generado_por = db.Column(db.String(100))  # Username del profesor
+    generado_por = db.Column(db.String(100))
     total_alumnos = db.Column(db.Integer, default=0)
     total_registros = db.Column(db.Integer, default=0)
 
-# --- MODELO PARA ACTIVIDADES POR GRADO ---
 class ActividadGrado(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    grado = db.Column(db.Integer) # 1, 2, 3, 4, 5, 6
+    grado = db.Column(db.Integer)
     titulo = db.Column(db.String(100))
     descripcion = db.Column(db.Text)
-    # Opcional: Link a un recurso o foto
-    imagen_url = db.Column(db.String(200), nullable=True) 
+    imagen_url = db.Column(db.String(200), nullable=True)
     fecha_actualizacion = db.Column(db.DateTime, default=datetime.utcnow)
 
-# --- MODELO PARA CUESTIONARIOS ---
 class Cuestionario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     titulo = db.Column(db.String(100))
-    url = db.Column(db.String(500)) # El link de Google Forms
-    grado = db.Column(db.String(20)) # Para quién es: "1°", "2°", etc.
+    url = db.Column(db.String(500))
+    grado = db.Column(db.String(20))
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
-# --- MODELO: BANCO DE CUESTIONARIOS (BODEGA) ---
 class BancoCuestionario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     titulo = db.Column(db.String(100), nullable=False)
     url = db.Column(db.String(500), nullable=False)
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
 
-# --- MODELO PARA HORARIOS ---
 class Horario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    dia = db.Column(db.String(20))     # Lunes, Martes...
-    grados = db.Column(db.String(50))  # Ej: "1° y 2°"
-    hora = db.Column(db.String(50))    # Ej: "08:00 - 10:00 AM"
+    dia = db.Column(db.String(20))
+    grados = db.Column(db.String(50))
+    hora = db.Column(db.String(50))
 
-# --- NUEVO MODELO PARA PLATAFORMAS ---
 class Plataforma(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(50))
     url = db.Column(db.String(500))
-    icono = db.Column(db.String(50)) # Guardaremos la clase de FontAwesome (ej: 'fa-code')
-
-# --- MODELOS PARA EL CHAT ---
+    icono = db.Column(db.String(50))
 
 class Mensaje(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
-    nombre_alumno = db.Column(db.String(100)) # Guardamos el nombre para no hacer tantas consultas
-    grado_grupo = db.Column(db.String(20))    # Para filtrar: "6A" solo lee "6A"
+    nombre_alumno = db.Column(db.String(100))
+    grado_grupo = db.Column(db.String(20))
     contenido = db.Column(db.Text)
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Configuracion(db.Model):
-    # Una tabla simple para guardar ajustes globales (como el switch del chat)
-    clave = db.Column(db.String(50), primary_key=True) # Ej: "chat_activo"
-    valor = db.Column(db.String(200)) # Ej: "True" o "False"
+    clave = db.Column(db.String(50), primary_key=True)
+    valor = db.Column(db.String(200))
 
-# --- MODELO DE RECURSOS ---
 class Recurso(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     titulo = db.Column(db.String(100), nullable=False)
-    archivo_url = db.Column(db.String(300), nullable=False) # Guardará el nombre en S3 o Local
-    tipo_archivo = db.Column(db.String(10)) # 'PDF', 'WORD', 'OTRO'
+    archivo_url = db.Column(db.String(300), nullable=False)
+    tipo_archivo = db.Column(db.String(10))
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
-# --- MODELO: CRITERIOS DE EVALUACIÓN ---
 class CriterioBoleta(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    grado = db.Column(db.String(10)) # Ej: "1", "2", "6"
-    nombre = db.Column(db.String(100)) # Ej: "Entrega de Tareas", "Participación"
+    grado = db.Column(db.String(10))
+    nombre = db.Column(db.String(100))
 
-# --- MODELO PARA BOLETAS GENERADAS ---
 class BoletaGenerada(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
-    archivo_url = db.Column(db.String(500))  # URL de S3 o ruta local
+    archivo_url = db.Column(db.String(500))
     nombre_archivo = db.Column(db.String(200))
     fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
-    periodo = db.Column(db.String(50))  # Ej: "1er Bimestre 2024"
+    periodo = db.Column(db.String(50))
     promedio = db.Column(db.Float)
     observaciones = db.Column(db.Text)
-    generado_por = db.Column(db.String(100))  # Username del profesor
-    
-    # Relación para obtener datos del alumno
+    generado_por = db.Column(db.String(100))
     alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True))
 
-# --- FUNCIONES AUXILIARES (HELPER FUNCTIONS) ---
+# --- FUNCIONES AUXILIARES REFACTORIZADAS ---
 
 def get_current_user():
     """
@@ -310,130 +448,16 @@ def migrar_bd_fotos():
     """
     try:
         if not column_exists('usuario_alumno', 'foto_perfil'):
-            print("🔧 Migrando BD: Agregando columna 'foto_perfil'...")
+            logger.info("🔧 Migrando BD: Agregando columna 'foto_perfil'...")
             with db.engine.connect() as conn:
                 conn.execute(db.text("ALTER TABLE usuario_alumno ADD COLUMN foto_perfil VARCHAR(300)"))
                 conn.commit()
-            print("✅ Migración completada: columna 'foto_perfil' agregada")
+            logger.info("✅ Migración completada: columna 'foto_perfil' agregada")
         else:
-            print("✅ Columna 'foto_perfil' ya existe")
+            logger.info("✅ Columna 'foto_perfil' ya existe")
     except Exception as e:
-        print(f"⚠️ Error en migración: {str(e)}")
-
-def descargar_de_s3(s3_key):
-    """
-    Descarga un archivo desde iDrive e2 y lo retorna como BytesIO
-    para servirlo directamente al usuario.
-    """
-    try:
-        s3 = boto3.client('s3',
-                        endpoint_url=S3_ENDPOINT,
-                        aws_access_key_id=S3_KEY,
-                        aws_secret_access_key=S3_SECRET,
-                        region_name='us-west-1')
-        
-        # Descargar el objeto
-        s3_object = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
-        
-        # Leer el contenido en memoria
-        file_content = s3_object['Body'].read()
-        
-        # Obtener el tipo de contenido
-        content_type = s3_object.get('ContentType', 'application/octet-stream')
-        
-        return BytesIO(file_content), content_type
-        
-    except Exception as e:
-        print(f"❌ Error al descargar de S3: {str(e)}")
-        return None, None
-
-def validate_file(file_stream, filename):
-    """Validación exhaustiva de archivos"""
-    # 1. Tamaño
-    file_stream.seek(0, 2)  # Ir al final
-    size = file_stream.tell()
-    file_stream.seek(0)  # Volver al inicio
-    
-    if size > MAX_FILE_SIZE:
-        return False, "Archivo demasiado grande (máx 50MB)"
-    
-    # 2. Extensión
-    ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-    if not ext:
-        return False, "Archivo sin extensión"
-    
-    # 3. Extensiones permitidas
-    allowed_all = set().union(*ALLOWED_EXTENSIONS.values())
-    if ext not in allowed_all:
-        return False, f"Extensión .{ext} no permitida"
-    
-    # 4. Magic number (verdadero tipo de archivo)
-    try:
-        file_content = file_stream.read(2048)
-        file_stream.seek(0)
-        
-        mime = magic.from_buffer(file_content, mime=True)
-        
-        # Mapeo de MIME types a extensiones permitidas
-        mime_to_ext = {
-            'image/png': 'png',
-            'image/jpeg': ['jpg', 'jpeg'],
-            'image/gif': 'gif',
-            'image/webp': 'webp',
-            'image/bmp': 'bmp',
-            'application/pdf': 'pdf',
-            'application/msword': 'doc',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-            'application/vnd.ms-excel': 'xls',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-            'application/vnd.ms-powerpoint': 'ppt',
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
-            'text/plain': 'txt',
-            'application/zip': 'zip',
-            'application/x-rar-compressed': 'rar',
-            'application/x-7z-compressed': '7z',
-        }
-        
-        # Verificar que el MIME type sea permitido
-        if mime not in mime_to_ext:
-            return False, f"Tipo de archivo {mime} no permitido"
-        
-        # Verificar que extensión coincida con MIME real
-        expected_exts = mime_to_ext[mime]
-        if isinstance(expected_exts, list):
-            if ext not in expected_exts:
-                return False, f"Extensión .{ext} no coincide con tipo real {mime}"
-        elif ext != expected_exts:
-            # Para casos donde hay múltiples extensiones para un MIME type
-            if mime == 'image/jpeg' and ext in ['jpg', 'jpeg']:
-                pass  # jpg y jpeg son ambos JPEG
-            else:
-                return False, f"Extensión .{ext} no coincide con tipo real {mime}"
-            
-    except Exception as e:
-        print(f"⚠️ Magic number validation failed: {str(e)}")
-        # Si magic falla, confiamos en la extensión (ya validada arriba)
-    
-    # 5. Validar nombre del archivo (evitar nombres peligrosos)
-    if '..' in filename or '/' in filename or '\\' in filename:
-        return False, "Nombre de archivo inválido"
-    
-    # 6. Validar contenido de texto (para archivos de texto)
-    if ext in ['txt', 'pdf', 'doc', 'docx']:
-        try:
-            # Leer primeros bytes para detectar binarios disfrazados
-            sample = file_stream.read(1024)
-            file_stream.seek(0)
-            
-            # Intentar decodificar como UTF-8
-            if b'\x00' in sample:
-                # Contiene null bytes, probablemente binario
-                if ext == 'txt':
-                    return False, "Archivo de texto contiene caracteres binarios"
-        except:
-            pass
-    
-    return True, "OK"
+        logger.error(f"⚠️ Error en migración: {str(e)}")
+        raise AppError(f"Error en migración: {str(e)}")
 
 def guardar_archivo(archivo):
     """
@@ -442,232 +466,194 @@ def guardar_archivo(archivo):
     """
     filename = secure_filename(archivo.filename)
     
-    print(f"\n📁 Intentando guardar archivo: {filename}")
-    print(f"   S3_ENDPOINT configurado: {bool(S3_ENDPOINT)}")
+    logger.info(f"Intentando guardar archivo: {filename}")
     
-    # Validar archivo antes de guardar
-    is_valid, message = validate_file(archivo, filename)
-    if not is_valid:
-        raise ValueError(f"Archivo inválido: {message}")
-    
-    # Intento de S3
-    if S3_ENDPOINT and S3_KEY and S3_SECRET:
-        try:
-            print(f"   ☁️ Intentando subir a iDrive e2...")
-            s3 = boto3.client('s3', 
-                            endpoint_url=S3_ENDPOINT,
-                            aws_access_key_id=S3_KEY,
-                            aws_secret_access_key=S3_SECRET,
-                            region_name='us-west-1')
-            
-            # Detectar tipo de contenido
-            content_type = archivo.content_type or 'application/octet-stream'
-            
-            # La KEY que usaremos (sin el endpoint, solo el path)
-            s3_key = f"uploads/{filename}"
-            
-            # Reiniciar el puntero del archivo
-            archivo.seek(0)
-            
-            # Subir con ContentType apropiado
-            s3.upload_fileobj(
-                archivo, 
-                S3_BUCKET, 
-                s3_key,
-                ExtraArgs={'ContentType': content_type}
-            )
-            
-            print(f"   ✅ Archivo subido exitosamente a S3")
-            print(f"   🔑 S3 Key: {s3_key}")
-            
-            # IMPORTANTE: Retornamos (s3_key, True) para indicar que está en S3
-            return (s3_key, True)
-            
-        except Exception as e:
-            print(f"   ❌ Error al subir a S3: {str(e)}")
-            print(f"   💾 Guardando localmente como fallback...")
-            flash(f'Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
-    else:
-        print(f"   ⚠️ Credenciales S3 incompletas. Guardando localmente...")
-    
-    # Fallback Local
-    archivo.seek(0)
-    local_path = os.path.join(UPLOAD_FOLDER, filename)
-    archivo.save(local_path)
-    print(f"   💾 Archivo guardado localmente: {filename}")
-    
-    # Retornamos (filename, False) para indicar que es local
-    return (filename, False)
+    try:
+        # Validar archivo
+        file_validator.validate(archivo, filename)
+        
+        # Intento de S3
+        if s3_manager.is_configured:
+            try:
+                logger.info(f"☁️ Intentando subir a iDrive e2...")
+                
+                # Detectar tipo de contenido
+                content_type = archivo.content_type or 'application/octet-stream'
+                s3_key = f"uploads/{filename}"
+                
+                # Subir a S3
+                archivo.seek(0)
+                s3_manager.upload_file(archivo, s3_key, content_type)
+                
+                logger.info(f"✅ Archivo subido exitosamente a S3: {s3_key}")
+                return (s3_key, True)
+                
+            except S3UploadError as e:
+                logger.warning(f"❌ Error al subir a S3: {str(e)}")
+                logger.info("💾 Guardando localmente como fallback...")
+                flash('Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
+        else:
+            logger.info("⚠️ Credenciales S3 incompletas. Guardando localmente...")
+        
+        # Fallback Local
+        archivo.seek(0)
+        local_path = os.path.join(UPLOAD_FOLDER, filename)
+        archivo.save(local_path)
+        logger.info(f"💾 Archivo guardado localmente: {filename}")
+        
+        return (filename, False)
+        
+    except FileValidationError as e:
+        logger.error(f"Validación de archivo falló: {str(e)}")
+        raise FileValidationError(str(e))
+    except Exception as e:
+        logger.error(f"Error general al guardar archivo: {str(e)}")
+        raise AppError(f"Error al guardar archivo: {str(e)}")
 
 def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     """
     Genera un PDF con el reporte de asistencia y lo guarda en S3
     Retorna: (url_donde_se_guardo, buffer_pdf, nombre_archivo)
     """
-    # Buffer en memoria para el PDF
-    buffer = BytesIO()
-    
-    # Crear el documento PDF
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    elements = []
-    styles = getSampleStyleSheet()
-    
-    # Estilo personalizado para el título
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        textColor=colors.HexColor('#1a5490'),
-        spaceAfter=30,
-        alignment=TA_CENTER
-    )
-    
-    # Título del reporte
-    titulo = f"Reporte de Asistencia - Grupo {grupo}"
-    elements.append(Paragraph(titulo, title_style))
-    elements.append(Spacer(1, 12))
-    
-    # Información de fechas
-    if fecha_fin:
-        periodo = f"Período: {fecha_inicio} a {fecha_fin}"
-    else:
-        periodo = f"Fecha: {fecha_inicio}"
-    
-    info_style = ParagraphStyle(
-        'Info',
-        parent=styles['Normal'],
-        fontSize=12,
-        spaceAfter=20,
-        alignment=TA_CENTER
-    )
-    elements.append(Paragraph(periodo, info_style))
-    elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", info_style))
-    elements.append(Spacer(1, 20))
-    
-    # Obtener datos de asistencia
-    if isinstance(fecha_inicio, str):
-        fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
-    else:
-        fecha_inicio_obj = fecha_inicio
-    
-    # Buscar alumnos del grupo
-    alumnos = UsuarioAlumno.query.filter_by(grado_grupo=grupo).all()
-    
-    # Crear tabla de datos
-    data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total']]
-    
-    for idx, alumno in enumerate(alumnos, 1):
-        query = Asistencia.query.filter_by(alumno_id=alumno.id)
+    try:
+        buffer = BytesIO()
+        
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1a5490'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+        
+        titulo = f"Reporte de Asistencia - Grupo {grupo}"
+        elements.append(Paragraph(titulo, title_style))
+        elements.append(Spacer(1, 12))
         
         if fecha_fin:
-            fecha_fin_obj = datetime.strptime(fecha_fin, '%Y-%m-%d').date() if isinstance(fecha_fin, str) else fecha_fin
-            query = query.filter(Asistencia.fecha >= fecha_inicio_obj, Asistencia.fecha <= fecha_fin_obj)
+            periodo = f"Período: {fecha_inicio} a {fecha_fin}"
         else:
-            query = query.filter_by(fecha=fecha_inicio_obj)
+            periodo = f"Fecha: {fecha_inicio}"
         
-        presentes = query.filter_by(estado='P').count()
-        faltas = query.filter_by(estado='F').count()
-        retardos = query.filter_by(estado='R').count()
-        justificados = query.filter_by(estado='J').count()
-        total = presentes + faltas + retardos + justificados
+        info_style = ParagraphStyle(
+            'Info',
+            parent=styles['Normal'],
+            fontSize=12,
+            spaceAfter=20,
+            alignment=TA_CENTER
+        )
+        elements.append(Paragraph(periodo, info_style))
+        elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", info_style))
+        elements.append(Spacer(1, 20))
         
-        data.append([
-            str(idx),
-            alumno.nombre_completo,
-            str(presentes),
-            str(faltas),
-            str(retardos),
-            str(justificados),
-            str(total)
+        if isinstance(fecha_inicio, str):
+            fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
+        else:
+            fecha_inicio_obj = fecha_inicio
+        
+        alumnos = UsuarioAlumno.query.filter_by(grado_grupo=grupo).all()
+        
+        data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total']]
+        
+        for idx, alumno in enumerate(alumnos, 1):
+            query = Asistencia.query.filter_by(alumno_id=alumno.id)
+            
+            if fecha_fin:
+                fecha_fin_obj = datetime.strptime(fecha_fin, '%Y-%m-%d').date() if isinstance(fecha_fin, str) else fecha_fin
+                query = query.filter(Asistencia.fecha >= fecha_inicio_obj, Asistencia.fecha <= fecha_fin_obj)
+            else:
+                query = query.filter_by(fecha=fecha_inicio_obj)
+            
+            presentes = query.filter_by(estado='P').count()
+            faltas = query.filter_by(estado='F').count()
+            retardos = query.filter_by(estado='R').count()
+            justificados = query.filter_by(estado='J').count()
+            total = presentes + faltas + retardos + justificados
+            
+            data.append([
+                str(idx),
+                alumno.nombre_completo,
+                str(presentes),
+                str(faltas),
+                str(retardos),
+                str(justificados),
+                str(total)
+            ])
+        
+        tabla = Table(data, colWidths=[0.5*inch, 3*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1*inch, 1*inch])
+        
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ]))
+        
+        elements.append(tabla)
+        elements.append(Spacer(1, 30))
+        
+        total_alumnos = len(alumnos)
+        total_registros = sum([
+            Asistencia.query.filter_by(alumno_id=a.id).filter(
+                Asistencia.fecha >= fecha_inicio_obj
+            ).count() for a in alumnos
         ])
-    
-    # Crear la tabla
-    tabla = Table(data, colWidths=[0.5*inch, 3*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1*inch, 1*inch])
-    
-    # Estilo de la tabla
-    tabla.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-    ]))
-    
-    elements.append(tabla)
-    elements.append(Spacer(1, 30))
-    
-    total_alumnos = len(alumnos)
-    total_registros = sum([
-        Asistencia.query.filter_by(alumno_id=a.id).filter(
-            Asistencia.fecha >= fecha_inicio_obj
-        ).count() for a in alumnos
-    ])
-    
-    stats_text = f"""
-    <b>Resumen del Grupo:</b><br/>
-    Total de alumnos: {total_alumnos}<br/>
-    Total de registros de asistencia: {total_registros}
-    """
-    
-    stats_style = ParagraphStyle(
-        'Stats',
-        parent=styles['Normal'],
-        fontSize=11,
-        spaceAfter=20
-    )
-    elements.append(Paragraph(stats_text, stats_style))
-    
-    # Generar el PDF en memoria
-    doc.build(elements)
-    buffer.seek(0)
-    
-    # Nombre del archivo
-    fecha_str = fecha_inicio_obj.strftime('%Y%m%d')
-    if fecha_fin:
-        fecha_fin_str = datetime.strptime(fecha_fin, '%Y-%m-%d').strftime('%Y%m%d') if isinstance(fecha_fin, str) else fecha_fin.strftime('%Y%m%d')
-        filename = f"asistencia_{grupo}_{fecha_str}_a_{fecha_fin_str}.pdf"
-    else:
-        filename = f"asistencia_{grupo}_{fecha_str}.pdf"
-    
-    # 🔥 CLAVE: Guardar en S3 pero SIN redirigir al usuario
-    file_url = None
-    if S3_ENDPOINT and S3_KEY and S3_SECRET:
-        try:
-            print(f"☁️ Guardando PDF en iDrive e2: {filename}")
-            s3 = boto3.client('s3',
-                            endpoint_url=S3_ENDPOINT,
-                            aws_access_key_id=S3_KEY,
-                            aws_secret_access_key=S3_SECRET,
-                            region_name='us-west-1')
-            
-            # Crear copia del buffer para subir a S3
-            buffer_copy = BytesIO(buffer.getvalue())
-            s3_key = f"reportes/{filename}"
-            s3.upload_fileobj(buffer_copy, S3_BUCKET, s3_key)
-            
-            file_url = f"{S3_ENDPOINT}/{S3_BUCKET}/{s3_key}"
-            print(f"✅ PDF guardado en iDrive e2")
-            
-        except Exception as e:
-            print(f"⚠️ No se pudo guardar en iDrive e2: {str(e)}")
-    
-    # También guardar localmente como respaldo
-    os.makedirs(os.path.join(UPLOAD_FOLDER, 'reportes'), exist_ok=True)
-    local_path = os.path.join(UPLOAD_FOLDER, 'reportes', filename)
-    
-    with open(local_path, 'wb') as f:
-        f.write(buffer.getvalue())
-    
-    print(f"💾 PDF guardado localmente como respaldo")
-    
-    # 🆕 REGISTRAR EL REPORTE EN LA BASE DE DATOS
-    try:
+        
+        stats_text = f"""
+        <b>Resumen del Grupo:</b><br/>
+        Total de alumnos: {total_alumnos}<br/>
+        Total de registros de asistencia: {total_registros}
+        """
+        
+        stats_style = ParagraphStyle(
+            'Stats',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=20
+        )
+        elements.append(Paragraph(stats_text, stats_style))
+        
+        doc.build(elements)
+        buffer.seek(0)
+        
+        fecha_str = fecha_inicio_obj.strftime('%Y%m%d')
+        if fecha_fin:
+            fecha_fin_str = datetime.strptime(fecha_fin, '%Y-%m-%d').strftime('%Y%m%d') if isinstance(fecha_fin, str) else fecha_fin.strftime('%Y%m%d')
+            filename = f"asistencia_{grupo}_{fecha_str}_a_{fecha_fin_str}.pdf"
+        else:
+            filename = f"asistencia_{grupo}_{fecha_str}.pdf"
+        
+        file_url = None
+        if s3_manager.is_configured:
+            try:
+                logger.info(f"☁️ Guardando PDF en iDrive e2: {filename}")
+                buffer_copy = BytesIO(buffer.getvalue())
+                s3_key = f"reportes/{filename}"
+                file_url = s3_manager.upload_file(buffer_copy, s3_key, 'application/pdf')
+                logger.info(f"✅ PDF guardado en iDrive e2")
+            except S3UploadError as e:
+                logger.warning(f"⚠️ No se pudo guardar en iDrive e2: {str(e)}")
+        
+        os.makedirs(os.path.join(UPLOAD_FOLDER, 'reportes'), exist_ok=True)
+        local_path = os.path.join(UPLOAD_FOLDER, 'reportes', filename)
+        
+        with open(local_path, 'wb') as f:
+            f.write(buffer.getvalue())
+        
+        logger.info(f"💾 PDF guardado localmente como respaldo")
+        
         nuevo_reporte = ReporteAsistencia(
             grupo=grupo,
             fecha_inicio=fecha_inicio_obj,
@@ -680,125 +666,140 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         )
         db.session.add(nuevo_reporte)
         db.session.commit()
-        print(f"📝 Reporte registrado en base de datos")
+        logger.info(f"📝 Reporte registrado en base de datos")
+        
+        buffer.seek(0)
+        return (file_url, buffer, filename)
+        
     except Exception as e:
-        print(f"⚠️ Error al registrar reporte en BD: {str(e)}")
-        # No afecta la generación del PDF
-    
-    # 🔥 IMPORTANTE: Devolver el buffer para descarga inmediata
-    buffer.seek(0)  # Resetear el puntero al inicio
-    return (file_url, buffer, filename)
+        logger.error(f"Error al generar PDF de asistencia: {str(e)}")
+        raise AppError(f"Error al generar reporte: {str(e)}")
 
 def generar_pdf_boleta(alumno, datos_evaluacion, observaciones, promedio, periodo):
     """Genera PDF de boleta y guarda en S3"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
-    
-    # Título
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], 
-                                 fontSize=20, textColor=colors.HexColor('#1a5490'), 
-                                 spaceAfter=20, alignment=TA_CENTER)
-    
-    elements.append(Paragraph("ESCUELA MARIANO ESCOBEDO", title_style))
-    elements.append(Paragraph("Boleta de Calificaciones", styles['Heading2']))
-    elements.append(Spacer(1, 20))
-    
-    # Info del alumno
-    info = f"<b>Alumno:</b> {alumno.nombre_completo}<br/><b>Grado:</b> {alumno.grado_grupo}<br/><b>Período:</b> {periodo}<br/><b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y')}"
-    elements.append(Paragraph(info, styles['Normal']))
-    elements.append(Spacer(1, 20))
-    
-    # Tabla de calificaciones
-    data = [['Criterio de Evaluación', 'Calificación']]
-    for criterio, nota in datos_evaluacion.items():
-        data.append([criterio.replace('_', ' ').title(), str(nota)])
-    data.append(['', ''])
-    data.append([Paragraph('<b>PROMEDIO GENERAL</b>', styles['Normal']), 
-                 Paragraph(f'<b>{promedio}</b>', styles['Normal'])])
-    
-    tabla = Table(data, colWidths=[4*inch, 2*inch])
-    tabla.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('GRID', (0, 0), (-1, -2), 1, colors.black),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8f4f8')),
-        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-    ]))
-    elements.append(tabla)
-    elements.append(Spacer(1, 30))
-    
-    # Observaciones
-    if observaciones:
-        elements.append(Paragraph("<b>Observaciones:</b>", styles['Heading3']))
-        elements.append(Paragraph(observaciones, styles['Normal']))
+    try:
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], 
+                                     fontSize=20, textColor=colors.HexColor('#1a5490'), 
+                                     spaceAfter=20, alignment=TA_CENTER)
+        
+        elements.append(Paragraph("ESCUELA MARIANO ESCOBEDO", title_style))
+        elements.append(Paragraph("Boleta de Calificaciones", styles['Heading2']))
         elements.append(Spacer(1, 20))
-    
-    # Firmas
-    elements.append(Spacer(1, 40))
-    firma_tabla = Table([['_________________________', '_________________________'],
-                        ['Firma del Profesor', 'Firma del Padre/Tutor']], 
-                       colWidths=[3*inch, 3*inch])
-    firma_tabla.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
-    elements.append(firma_tabla)
-    
-    # Generar PDF
-    doc.build(elements)
-    buffer.seek(0)
-    
-    # Nombre y guardar
-    filename = f"boleta_{alumno.grado_grupo}_{alumno.nombre_completo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    file_url = None
-    
-    # Intentar S3
-    if S3_ENDPOINT and S3_KEY and S3_SECRET:
-        try:
-            s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, aws_access_key_id=S3_KEY, 
-                            aws_secret_access_key=S3_SECRET, region_name='us-west-1')
-            s3_key = f"boletas/{filename}"
-            s3.upload_fileobj(BytesIO(buffer.getvalue()), S3_BUCKET, s3_key)
-            file_url = s3_key
-            print(f"✅ Boleta guardada en iDrive e2: {filename}")
-        except Exception as e:
-            print(f"⚠️ Error S3: {e}")
-    
-    # Respaldo local
-    os.makedirs(os.path.join(UPLOAD_FOLDER, 'boletas'), exist_ok=True)
-    with open(os.path.join(UPLOAD_FOLDER, 'boletas', filename), 'wb') as f:
-        f.write(buffer.getvalue())
-    
-    buffer.seek(0)
-    return (file_url or f"boletas/{filename}", buffer, filename)
+        
+        info = f"<b>Alumno:</b> {alumno.nombre_completo}<br/><b>Grado:</b> {alumno.grado_grupo}<br/><b>Período:</b> {periodo}<br/><b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y')}"
+        elements.append(Paragraph(info, styles['Normal']))
+        elements.append(Spacer(1, 20))
+        
+        data = [['Criterio de Evaluación', 'Calificación']]
+        for criterio, nota in datos_evaluacion.items():
+            data.append([criterio.replace('_', ' ').title(), str(nota)])
+        data.append(['', ''])
+        data.append([Paragraph('<b>PROMEDIO GENERAL</b>', styles['Normal']), 
+                     Paragraph(f'<b>{promedio}</b>', styles['Normal'])])
+        
+        tabla = Table(data, colWidths=[4*inch, 2*inch])
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -2), 1, colors.black),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8f4f8')),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ]))
+        elements.append(tabla)
+        elements.append(Spacer(1, 30))
+        
+        if observaciones:
+            elements.append(Paragraph("<b>Observaciones:</b>", styles['Heading3']))
+            elements.append(Paragraph(observaciones, styles['Normal']))
+            elements.append(Spacer(1, 20))
+        
+        elements.append(Spacer(1, 40))
+        firma_tabla = Table([['_________________________', '_________________________'],
+                            ['Firma del Profesor', 'Firma del Padre/Tutor']], 
+                           colWidths=[3*inch, 3*inch])
+        firma_tabla.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
+        elements.append(firma_tabla)
+        
+        doc.build(elements)
+        buffer.seek(0)
+        
+        filename = f"boleta_{alumno.grado_grupo}_{alumno.nombre_completo.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        file_url = None
+        
+        if s3_manager.is_configured:
+            try:
+                s3_key = f"boletas/{filename}"
+                file_url = s3_manager.upload_file(BytesIO(buffer.getvalue()), s3_key, 'application/pdf')
+                logger.info(f"✅ Boleta guardada en iDrive e2: {filename}")
+            except S3UploadError as e:
+                logger.warning(f"⚠️ Error S3: {e}")
+        
+        os.makedirs(os.path.join(UPLOAD_FOLDER, 'boletas'), exist_ok=True)
+        with open(os.path.join(UPLOAD_FOLDER, 'boletas', filename), 'wb') as f:
+            f.write(buffer.getvalue())
+        
+        buffer.seek(0)
+        return (file_url or f"boletas/{filename}", buffer, filename)
+        
+    except Exception as e:
+        logger.error(f"Error al generar PDF de boleta: {str(e)}")
+        raise AppError(f"Error al generar boleta: {str(e)}")
+
+# --- HANDLERS DE ERROR ---
+
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.warning(f"404 Error: {request.url}")
+    return render_template('errors/404.html'), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    db.session.rollback()
+    logger.error(f"500 Error: {str(error)}")
+    return render_template('errors/500.html'), 500
+
+@app.errorhandler(AppError)
+def app_error(error):
+    logger.error(f"AppError: {str(error)}")
+    flash(f'Error en la aplicación: {str(error)}', 'danger')
+    return redirect(url_for('index'))
+
+@app.errorhandler(FileValidationError)
+def file_validation_error(error):
+    logger.warning(f"FileValidationError: {str(error)}")
+    flash(f'Error de validación de archivo: {str(error)}', 'danger')
+    return redirect(request.referrer or url_for('index'))
+
+@app.errorhandler(S3UploadError)
+def s3_upload_error(error):
+    logger.error(f"S3UploadError: {str(error)}")
+    flash(f'Error al subir a la nube: {str(error)}', 'danger')
+    return redirect(request.referrer or url_for('index'))
 
 # --- RUTAS PRINCIPALES ---
 
 @app.route('/')
 def index():
-    # 1. Obtener Anuncios
     anuncios = Anuncio.query.order_by(Anuncio.fecha.desc()).limit(5).all()
-    
-    # 2. Obtener Horarios (Ordenados por día es difícil con texto, los mostraremos como se creen)
-    # Opcional: Podríamos ordenarlos por ID para que salgan en el orden que los agregaste
     horarios = Horario.query.all()
-    
-    # 3. Obtener Plataformas
     plataformas = Plataforma.query.all()
-    
-    # 4. NUEVO: Obtener Recursos
     recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
 
     return render_template('index.html', anuncios=anuncios, horarios=horarios, plataformas=plataformas, recursos=recursos)
 
-# --- RUTAS DE AUTENTICACIÓN (LOGIN PROFESOR) ---
+# --- RUTAS DE AUTENTICACIÓN ---
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # Si ya está logueado, mandar al dashboard
     user_info = get_current_user()
     if user_info and user_info[0] == 'profesor':
         return redirect(url_for('admin_dashboard'))
@@ -807,16 +808,12 @@ def login():
         username = request.form['username']
         password = request.form['password']
         
-        # Solo permitimos el usuario 'admin'
         if username == 'admin':
-            # 1. Buscamos si hay una contraseña guardada en la Base de Datos
             config_pass = Configuracion.query.get('admin_password')
             
-            # 2. Si existe, verificamos el hash. Si no existe, usamos la default 'profesor123'
             if config_pass:
                 es_valida = check_password_hash(config_pass.valor, password)
             else:
-                # Caso inicial (antes de que la cambies por primera vez)
                 es_valida = (password == 'profesor123')
 
             if es_valida:
@@ -838,7 +835,6 @@ def logout():
     flash('Sesión cerrada correctamente.')
     return redirect(url_for('index'))
 
-# --- RECUPERAR CONTRASEÑA (PROFESOR) ---
 @app.route('/recuperar-acceso', methods=['GET', 'POST'])
 def recuperar_acceso():
     if request.method == 'POST':
@@ -846,9 +842,7 @@ def recuperar_acceso():
         token = request.form['token']
         nueva_pass = request.form['nueva_pass']
         
-        # 1. Verificar Usuario y Token Maestro
         if usuario == 'admin' and token == TOKEN_MAESTRO:
-            # 2. Guardar la nueva contraseña en la BD (Tabla Configuracion)
             hash_pass = generate_password_hash(nueva_pass)
             
             config = Configuracion.query.get('admin_password')
@@ -866,11 +860,8 @@ def recuperar_acceso():
             
     return render_template('recuperar.html')
 
-# --- RUTAS DE ALUMNOS (LOGIN CON USUARIO/CONTRASEÑA) ---
-
 @app.route('/alumnos/login', methods=['GET', 'POST'])
 def login_alumnos():
-    # Si ya entró, lo mandamos directo al panel
     user_info = get_current_user()
     if user_info and user_info[0] == 'alumno':
         return redirect(url_for('panel_alumnos'))
@@ -879,12 +870,10 @@ def login_alumnos():
         username = request.form['username']
         password = request.form['password']
         
-        # Buscar usuario en la base de datos
         alumno = UsuarioAlumno.query.filter_by(username=username, activo=True).first()
         
         if alumno and check_password_hash(alumno.password_hash, password):
-            # Guardar datos en sesión
-            session.permanent = True  # <--- LÍNEA AGREGADA
+            session.permanent = True
             session['alumno_id'] = alumno.id
             session['alumno_nombre'] = alumno.nombre_completo
             session['alumno_grado'] = alumno.grado_grupo
@@ -901,7 +890,6 @@ def login_alumnos():
 
 @app.route('/alumnos/logout')
 def logout_alumnos():
-    # Borramos solo los datos del alumno
     session.pop('alumno_id', None)
     session.pop('alumno_nombre', None)
     session.pop('alumno_grado', None)
@@ -909,13 +897,9 @@ def logout_alumnos():
     session.pop('tipo_usuario', None)
     return redirect(url_for('index'))
 
-# --- RUTA PARA SUBIR FOTO DE PERFIL (ALUMNO) ---
-
 @app.route('/alumnos/perfil/foto', methods=['POST'])
 @require_alumno
 def actualizar_foto_perfil():
-    """Permite al alumno subir/cambiar su foto de perfil"""
-    
     if 'foto' not in request.files:
         flash('No se seleccionó ninguna foto', 'danger')
         return redirect(url_for('panel_alumnos'))
@@ -927,20 +911,15 @@ def actualizar_foto_perfil():
         return redirect(url_for('panel_alumnos'))
     
     try:
-        # Guardar foto (usa la misma función que para tareas)
         ruta_foto, es_s3 = guardar_archivo(foto)
-        
-        # Actualizar en la base de datos
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         alumno.foto_perfil = ruta_foto
         db.session.commit()
         
         flash('¡Foto de perfil actualizada correctamente! 🎉', 'success')
         
-    except ValueError as e:
-        flash(f'Error en la foto: {str(e)}', 'danger')
-    except Exception as e:
-        flash(f'Error al subir la foto: {str(e)}', 'danger')
+    except (FileValidationError, AppError) as e:
+        flash(f'Error: {str(e)}', 'danger')
     
     return redirect(url_for('panel_alumnos'))
 
@@ -954,7 +933,6 @@ def admin_dashboard():
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     total_entregas = EntregaAlumno.query.count()
     
-    # Verificar estado del chat
     config = Configuracion.query.get('chat_activo')
     chat_activo = True if not config or config.valor == 'True' else False
     
@@ -965,18 +943,16 @@ def admin_dashboard():
                          total_entregas=total_entregas,
                          chat_activo=chat_activo)
 
-# --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
-# 1. INTERRUPTOR DEL PROFE
+# --- RUTAS DEL CHAT ---
+
 @app.route('/admin/chat/toggle')
 @require_profesor
 def toggle_chat():
-    # Buscar la configuración, si no existe la creamos
     config = Configuracion.query.get('chat_activo')
     if not config:
         config = Configuracion(clave='chat_activo', valor='True')
         db.session.add(config)
     
-    # Invertir el valor (Si es True pasa a False y viceversa)
     if config.valor == 'True':
         config.valor = 'False'
         flash('Chat desactivado para todos los alumnos.', 'secondary')
@@ -987,11 +963,9 @@ def toggle_chat():
     db.session.commit()
     return redirect(url_for('admin_dashboard'))
 
-# 2. ENVIAR MENSAJE (ALUMNO)
 @app.route('/api/chat/enviar', methods=['POST'])
 @require_alumno
 def enviar_mensaje():
-    # Verificar si el chat está activo
     config = Configuracion.query.get('chat_activo')
     if config and config.valor == 'False':
         return {'status': 'error', 'msg': 'Chat desactivado por el profesor'}, 403
@@ -1000,11 +974,10 @@ def enviar_mensaje():
     if not contenido or contenido.strip() == '':
         return {'status': 'error', 'msg': 'Mensaje vacío'}, 400
 
-    # Guardar mensaje
     nuevo = Mensaje(
         alumno_id=session['alumno_id'],
         nombre_alumno=session['alumno_nombre'],
-        grado_grupo=session['alumno_grado'], # Ej: "6A"
+        grado_grupo=session['alumno_grado'],
         contenido=contenido
     )
     db.session.add(nuevo)
@@ -1012,19 +985,15 @@ def enviar_mensaje():
     
     return {'status': 'ok'}
 
-# 3. LEER MENSAJES (ALUMNO)
 @app.route('/api/chat/obtener')
 @require_alumno
 def obtener_mensajes():
-    # Obtener mensajes SOLO de mi grupo (últimos 50)
     mi_grupo = session['alumno_grado']
     mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo).order_by(Mensaje.fecha.asc()).all()
     
-    # Verificar estado del chat
     config = Configuracion.query.get('chat_activo')
     chat_activo = True if not config or config.valor == 'True' else False
 
-    # Convertir a JSON para que Javascript lo entienda
     lista_mensajes = []
     for m in mensajes:
         es_mio = (m.alumno_id == session['alumno_id'])
@@ -1045,20 +1014,16 @@ def obtener_mensajes():
 @app.route('/admin/alumnos')
 @require_profesor
 def gestionar_alumnos():
-    # 1. Capturar filtro
-    filtro = request.args.get('grado') # Ej: '6A'
+    filtro = request.args.get('grado')
     
-    # 2. Lógica de filtrado
     if filtro and filtro != 'Todos':
         alumnos = UsuarioAlumno.query.filter_by(grado_grupo=filtro).order_by(UsuarioAlumno.nombre_completo).all()
     else:
         alumnos = UsuarioAlumno.query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
     
-    # 3. Estadísticas
     total_alumnos = UsuarioAlumno.query.count()
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     
-    # 4. Enviar todo a la plantilla
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
@@ -1072,23 +1037,19 @@ def agregar_alumno():
     username = request.form['username']
     nombre_completo = request.form['nombre_completo']
     password = request.form['password']
+    grado = request.form['grado']
+    grupo = request.form['grupo']
+    grado_grupo = f"{grado}{grupo}"
     
-    # NUEVA LÓGICA: Recibimos grado y grupo por separado y los unimos
-    grado = request.form['grado'] # Ej: "6"
-    grupo = request.form['grupo'] # Ej: "A"
-    grado_grupo = f"{grado}{grupo}" # Resultado: "6A"
-    
-    # Verificar si el username ya existe
     existe = UsuarioAlumno.query.filter_by(username=username).first()
     if existe:
         flash(f'El usuario "{username}" ya existe. Elige otro.', 'danger')
         return redirect(url_for('gestionar_alumnos'))
     
-    # Crear nuevo alumno
     nuevo_alumno = UsuarioAlumno(
         username=username,
         nombre_completo=nombre_completo,
-        grado_grupo=grado_grupo, # Guardamos "6A"
+        grado_grupo=grado_grupo,
         password_hash=generate_password_hash(password),
         activo=True
     )
@@ -1108,7 +1069,6 @@ def editar_alumno(id):
     alumno.grado_grupo = request.form['grado_grupo']
     alumno.activo = 'activo' in request.form
     
-    # Si se proporcionó una nueva contraseña, actualizarla
     nueva_password = request.form.get('password')
     if nueva_password:
         alumno.password_hash = generate_password_hash(nueva_password)
@@ -1132,23 +1092,19 @@ def eliminar_alumno(id):
 @app.route('/admin/asistencia/tomar', methods=['POST'])
 @require_profesor
 def tomar_asistencia():
-    # Recibimos la fecha del formulario (o usamos hoy)
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
-    # Recorremos el formulario. Los campos vienen como "asistencia_IDALUMNO"
     for key, value in request.form.items():
         if key.startswith('asistencia_'):
             alumno_id = int(key.split('_')[1])
-            estado = value # P, F, R
+            estado = value
             
-            # Buscar si ya se tomó lista ese día para ese alumno (para actualizar en vez de duplicar)
             registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
             
             if registro:
-                registro.estado = estado # Actualizar
+                registro.estado = estado
             else:
-                # Crear nuevo
                 nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
                 db.session.add(nuevo)
     
@@ -1159,21 +1115,17 @@ def tomar_asistencia():
 @app.route('/admin/reporte-asistencia/<grupo>')
 @require_profesor
 def generar_reporte_asistencia(grupo):
-    # Obtener fechas del reporte
     fecha_inicio = request.args.get('fecha_inicio', date.today().isoformat())
     fecha_fin = request.args.get('fecha_fin', None)
     
     try:
-        # 🔥 Generar el PDF (se guarda automáticamente en iDrive e2)
         url_guardado, buffer_pdf, nombre_archivo = generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin)
         
-        # Mostrar mensaje al usuario
         if url_guardado:
             flash('✅ Reporte generado y guardado automáticamente en iDrive e2', 'success')
         else:
             flash('✅ Reporte generado correctamente', 'success')
         
-        # 🔥 DESCARGAR el PDF directamente al navegador del usuario
         return send_file(
             buffer_pdf,
             mimetype='application/pdf',
@@ -1181,15 +1133,14 @@ def generar_reporte_asistencia(grupo):
             download_name=nombre_archivo
         )
         
-    except Exception as e:
-        print(f"❌ Error completo: {str(e)}")
+    except AppError as e:
+        logger.error(f"Error al generar reporte: {str(e)}")
         flash(f'❌ Error al generar reporte: {str(e)}', 'danger')
         return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/descargar-reporte/<path:filename>')
 @require_profesor
 def descargar_reporte(filename):
-    """Ruta alternativa para descargar reportes guardados localmente"""
     try:
         return send_from_directory(
             os.path.join(UPLOAD_FOLDER, 'reportes'),
@@ -1197,16 +1148,15 @@ def descargar_reporte(filename):
             as_attachment=True
         )
     except Exception as e:
+        logger.error(f"Error al descargar reporte: {str(e)}")
         flash(f'Error al descargar reporte: {str(e)}', 'danger')
         return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/alumnos/entregas')
 @require_profesor
 def ver_entregas_alumnos():
-    # Obtener todas las entregas ordenadas por fecha
     entregas = EntregaAlumno.query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
     
-    # Agrupar por alumno para estadísticas
     entregas_por_alumno = {}
     for entrega in entregas:
         if entrega.nombre_alumno not in entregas_por_alumno:
@@ -1229,30 +1179,22 @@ def calificar_entrega(id):
     flash(f'Entrega de {entrega.nombre_alumno} calificada con {entrega.estrellas} estrellas.', 'success')
     return redirect(url_for('ver_entregas_alumnos'))
 
-# --- RUTAS PARA VER REPORTES GENERADOS ---
-
 @app.route('/admin/reportes-asistencia')
 @require_profesor
 def ver_reportes_asistencia():
-    """Página para ver todos los reportes generados con filtros"""
-    # Obtener filtros
     filtro_grupo = request.args.get('grupo', 'Todos')
     filtro_mes = request.args.get('mes', '')
     filtro_anio = request.args.get('anio', '')
     
-    # Query base
     query = ReporteAsistencia.query
     
-    # Aplicar filtro de grupo
     if filtro_grupo and filtro_grupo != 'Todos':
         query = query.filter_by(grupo=filtro_grupo)
     
-    # Aplicar filtro de mes/año
     if filtro_mes and filtro_anio:
         try:
             mes = int(filtro_mes)
             anio = int(filtro_anio)
-            # Filtrar reportes del mes seleccionado
             primer_dia = date(anio, mes, 1)
             if mes == 12:
                 ultimo_dia = date(anio + 1, 1, 1) - timedelta(days=1)
@@ -1266,14 +1208,11 @@ def ver_reportes_asistencia():
         except:
             pass
     
-    # Ordenar por fecha de generación (más reciente primero)
     reportes = query.order_by(ReporteAsistencia.fecha_generacion.desc()).all()
     
-    # Obtener lista de grupos únicos para el filtro
     grupos_disponibles = db.session.query(ReporteAsistencia.grupo).distinct().all()
     grupos_disponibles = [g[0] for g in grupos_disponibles]
     
-    # Estadísticas
     total_reportes = ReporteAsistencia.query.count()
     reportes_este_mes = ReporteAsistencia.query.filter(
         ReporteAsistencia.fecha_generacion >= date.today().replace(day=1)
@@ -1292,34 +1231,22 @@ def ver_reportes_asistencia():
 @app.route('/admin/descargar-reporte/<int:reporte_id>')
 @require_profesor
 def descargar_reporte_guardado(reporte_id):
-    """Descargar un reporte previamente generado"""
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
     
     try:
-        # Si está en S3
         if reporte.archivo_url and reporte.archivo_url.startswith('http'):
-            if S3_ENDPOINT and S3_KEY and S3_SECRET:
-                s3 = boto3.client('s3',
-                                endpoint_url=S3_ENDPOINT,
-                                aws_access_key_id=S3_KEY,
-                                aws_secret_access_key=S3_SECRET,
-                                region_name='us-west-1')
-                
-                # Extraer el key del archivo
+            if s3_manager.is_configured:
                 key = f"reportes/{reporte.nombre_archivo}"
+                file_stream, content_type = s3_manager.download_file(key)
                 
-                # Descargar desde S3
-                s3_object = s3.get_object(Bucket=S3_BUCKET, Key=key)
-                pdf_content = s3_object['Body'].read()
-                
-                return send_file(
-                    BytesIO(pdf_content),
-                    mimetype='application/pdf',
-                    as_attachment=True,
-                    download_name=reporte.nombre_archivo
-                )
+                if file_stream:
+                    return send_file(
+                        file_stream,
+                        mimetype='application/pdf',
+                        as_attachment=True,
+                        download_name=reporte.nombre_archivo
+                    )
         
-        # Si está guardado localmente
         return send_from_directory(
             os.path.join(UPLOAD_FOLDER, 'reportes'),
             reporte.nombre_archivo,
@@ -1327,57 +1254,44 @@ def descargar_reporte_guardado(reporte_id):
         )
         
     except Exception as e:
+        logger.error(f"Error al descargar reporte: {str(e)}")
         flash(f'Error al descargar reporte: {str(e)}', 'danger')
         return redirect(url_for('ver_reportes_asistencia'))
 
 @app.route('/admin/eliminar-reporte/<int:reporte_id>')
 @require_profesor
 def eliminar_reporte(reporte_id):
-    """Eliminar un reporte del registro (no borra el archivo físico)"""
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
     
     try:
-        # Opcionalmente eliminar de S3
-        if reporte.archivo_url and reporte.archivo_url.startswith('http') and S3_ENDPOINT and S3_KEY and S3_SECRET:
+        if reporte.archivo_url and reporte.archivo_url.startswith('http') and s3_manager.is_configured:
             try:
-                s3 = boto3.client('s3',
-                                endpoint_url=S3_ENDPOINT,
-                                aws_access_key_id=S3_KEY,
-                                aws_secret_access_key=S3_SECRET,
-                                region_name='us-west-1')
                 key = f"reportes/{reporte.nombre_archivo}"
-                s3.delete_object(Bucket=S3_BUCKET, Key=key)
-                print(f"🗑️ Archivo eliminado de S3: {key}")
-            except Exception as e:
-                print(f"⚠️ No se pudo eliminar de S3: {e}")
+                s3_manager.delete_file(key)
+                logger.info(f"🗑️ Archivo eliminado de S3: {key}")
+            except S3UploadError as e:
+                logger.warning(f"⚠️ No se pudo eliminar de S3: {e}")
         
-        # Eliminar registro de la base de datos
         db.session.delete(reporte)
         db.session.commit()
         flash('Reporte eliminado correctamente', 'success')
         
     except Exception as e:
+        logger.error(f"Error al eliminar reporte: {str(e)}")
         flash(f'Error al eliminar reporte: {str(e)}', 'danger')
     
     return redirect(url_for('ver_reportes_asistencia'))
 
-# --- RUTAS DE ALUMNOS (PANEL Y SUBIDA DE TAREAS) ---
+# --- RUTAS DE ALUMNOS ---
 
 @app.route('/alumnos')
 @require_alumno
 def panel_alumnos():
     alumno = UsuarioAlumno.query.get(session['alumno_id'])
     
-    # 1. Tareas entregadas
     mis_entregas = EntregaAlumno.query.filter_by(alumno_id=alumno.id).order_by(EntregaAlumno.fecha_entrega.desc()).all()
-    
-    # 2. LÓGICA SIMPLIFICADA (CAMBIO):
-    # Ahora buscamos coincidencia EXACTA. Si soy "6A", busco exámenes para "6A".
-    mi_grupo_exacto = session['alumno_grado'] # Ej: "6A"
-    
+    mi_grupo_exacto = session['alumno_grado']
     mis_cuestionarios = Cuestionario.query.filter_by(grado=mi_grupo_exacto).order_by(Cuestionario.fecha.desc()).all()
-    
-    # Resto de la función igual...
     anuncios = Anuncio.query.order_by(Anuncio.fecha.desc()).limit(3).all()
     
     total_estrellas = sum(e.estrellas for e in mis_entregas if e.estrellas > 0)
@@ -1405,37 +1319,31 @@ def subir_tarea():
         return redirect(url_for('panel_alumnos'))
 
     if archivo:
-        # Obtener datos del alumno
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         
         try:
-            # CAMBIO AQUÍ: Ahora guardar_archivo retorna tupla y valida el archivo
             ruta, es_s3 = guardar_archivo(archivo)
             
-            # Guardar en DB
             nueva_entrega = EntregaAlumno(
                 alumno_id=alumno.id,
                 nombre_alumno=alumno.nombre_completo,
                 grado_grupo=alumno.grado_grupo,
-                archivo_url=ruta  # Guardamos la KEY de S3 o filename local
+                archivo_url=ruta
             )
             db.session.add(nueva_entrega)
             db.session.commit()
             
             flash('¡Tarea enviada con éxito! El profesor la revisará pronto.', 'success')
-        except ValueError as e:
-            flash(f'Error en el archivo: {str(e)}', 'danger')
-        except Exception as e:
-            flash(f'Error al subir archivo: {str(e)}', 'danger')
+        except (FileValidationError, AppError) as e:
+            flash(f'Error: {str(e)}', 'danger')
         
         return redirect(url_for('panel_alumnos'))
 
-# --- RUTAS DE INVENTARIO (CRUD) ---
+# --- RUTAS DE INVENTARIO ---
 
 @app.route('/admin/inventario')
 @require_profesor
 def inventario():
-    # Obtener todos los equipos ordenados por ID
     equipos = Equipo.query.order_by(Equipo.id.desc()).all()
     return render_template('admin/inventario.html', equipos=equipos)
 
@@ -1447,7 +1355,7 @@ def agregar_equipo():
         marca=request.form['marca'],
         modelo=request.form['modelo'],
         estado=request.form['estado'],
-        qr_data=f"ME-{int(datetime.now().timestamp())}" # Generamos un ID único temporal para el QR
+        qr_data=f"ME-{int(datetime.now().timestamp())}"
     )
     
     db.session.add(nuevo_equipo)
@@ -1464,29 +1372,17 @@ def eliminar_equipo(id):
     flash('Equipo eliminado del inventario', 'warning')
     return redirect(url_for('inventario'))
 
-@app.route('/admin/generar_qr/<int:id>')
-@require_profesor
-def generar_qr(id):
-    # Lógica simple para generar QR en memoria (o guardar imagen)
-    equipo = Equipo.query.get_or_404(id)
-    # Aquí luego implementaremos la generación real de la imagen QR
-    return f"QR generado para {equipo.tipo} {equipo.marca}"
-
 @app.route('/admin/generar_qr_img/<int:id>')
 @require_profesor
 def generar_qr_img(id):
     equipo = Equipo.query.get_or_404(id)
-
-    # Datos que llevará el QR (Simple y útil)
     info_qr = f"PROPIEDAD ESCUELA MARIANO ESCOBEDO\nID: {equipo.id}\nTipo: {equipo.tipo}\nMarca: {equipo.marca}\nModelo: {equipo.modelo}"
 
-    # Crear el código QR en memoria
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(info_qr)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
 
-    # Guardar en un buffer de memoria (bytes)
     img_io = io.BytesIO()
     img.save(img_io, 'PNG')
     img_io.seek(0)
@@ -1498,11 +1394,8 @@ def generar_qr_img(id):
 @app.route('/admin/mantenimiento')
 @require_profesor
 def mantenimiento():
-    # Obtener reportes activos (sin reparar) y el historial (reparados)
     pendientes = Mantenimiento.query.filter_by(fecha_reparacion=None).all()
     historial = Mantenimiento.query.filter(Mantenimiento.fecha_reparacion != None).order_by(Mantenimiento.fecha_reparacion.desc()).limit(10).all()
-    
-    # Necesitamos la lista de equipos para el formulario de "Nuevo Reporte"
     equipos = Equipo.query.all()
     
     return render_template('admin/mantenimiento.html', pendientes=pendientes, historial=historial, equipos=equipos)
@@ -1513,10 +1406,8 @@ def reportar_falla():
     equipo_id = request.form['equipo_id']
     descripcion = request.form['descripcion']
     
-    # 1. Crear el reporte
     nuevo_reporte = Mantenimiento(equipo_id=equipo_id, descripcion_falla=descripcion)
     
-    # 2. Actualizar el estado del equipo automáticamente a "En Reparación"
     equipo = Equipo.query.get(equipo_id)
     equipo.estado = "En Reparación"
     
@@ -1531,12 +1422,9 @@ def solucionar_falla():
     reporte_id = request.form['reporte_id']
     solucion = request.form['solucion']
     
-    # 1. Cerrar el reporte
     reporte = Mantenimiento.query.get(reporte_id)
     reporte.fecha_reparacion = datetime.utcnow()
     reporte.solucion = solucion
-    
-    # 2. Devolver el equipo a estado "Funcional" automáticamente
     reporte.equipo.estado = "Funcional"
     
     db.session.commit()
@@ -1548,7 +1436,6 @@ def solucionar_falla():
 @app.route('/admin/anuncios')
 @require_profesor
 def gestionar_anuncios():
-    # Ordenar por fecha, el más nuevo arriba
     anuncios = Anuncio.query.order_by(Anuncio.fecha.desc()).all()
     return render_template('admin/anuncios.html', anuncios=anuncios)
 
@@ -1579,22 +1466,20 @@ def eliminar_anuncio(id):
 @app.route('/admin/cuestionarios')
 @require_profesor
 def gestionar_cuestionarios():
-    # Mostrar todos
     cuestionarios = Cuestionario.query.order_by(Cuestionario.fecha.desc()).all()
     return render_template('admin/cuestionarios.html', cuestionarios=cuestionarios)
 
 @app.route('/admin/cuestionarios/publicar', methods=['POST'])
 @require_profesor
 def publicar_cuestionario():
-    # NUEVA LÓGICA: El examen va para un grupo específico
-    grado = request.form['grado'] # Ej: "6"
-    grupo = request.form['grupo'] # Ej: "A"
-    target = f"{grado}{grupo}"    # Resultado: "6A"
+    grado = request.form['grado']
+    grupo = request.form['grupo']
+    target = f"{grado}{grupo}"
     
     nuevo = Cuestionario(
         titulo=request.form['titulo'],
         url=request.form['url'],
-        grado=target # Guardamos "6A" en la base de datos
+        grado=target
     )
     db.session.add(nuevo)
     db.session.commit()
@@ -1615,7 +1500,6 @@ def eliminar_cuestionario(id):
 @app.route('/admin/banco')
 @require_profesor
 def gestionar_banco():
-    # Ordenar por fecha de creación
     banco = BancoCuestionario.query.order_by(BancoCuestionario.fecha_creacion.desc()).all()
     return render_template('admin/Banco_cuestionarios.html', banco=banco)
 
@@ -1640,25 +1524,21 @@ def eliminar_del_banco(id):
     flash('Plantilla eliminada.', 'warning')
     return redirect(url_for('gestionar_banco'))
 
-# --- LA MAGIA: ASIGNAR DESDE EL BANCO ---
 @app.route('/admin/banco/asignar', methods=['POST'])
 @require_profesor
 def asignar_desde_banco():
-    # 1. Obtenemos el ID de la plantilla y el grupo destino
     plantilla_id = request.form['plantilla_id']
     grado = request.form['grado']
     grupo = request.form['grupo']
-    target = f"{grado}{grupo}" # Ej: "6A"
+    target = f"{grado}{grupo}"
     
-    # 2. Buscamos el original en la bodega
     original = BancoCuestionario.query.get(plantilla_id)
     
     if original:
-        # 3. COPIAMOS los datos a la tabla real 'Cuestionario'
         nuevo_activo = Cuestionario(
             titulo=original.titulo,
             url=original.url,
-            grado=target # Aquí es donde se define para quién es
+            grado=target
         )
         db.session.add(nuevo_activo)
         db.session.commit()
@@ -1672,11 +1552,8 @@ def asignar_desde_banco():
 
 @app.route('/grado/<int:numero_grado>')
 def ver_grado(numero_grado):
-    # Buscar la info de este grado
     actividad = ActividadGrado.query.filter_by(grado=numero_grado).first()
     return render_template('publico/ver_grado.html', grado=numero_grado, actividad=actividad)
-
-# --- RUTA ADMIN PARA EDITAR GRADOS ---
 
 @app.route('/admin/grados', methods=['GET', 'POST'])
 @require_profesor
@@ -1686,15 +1563,12 @@ def gestionar_grados():
         titulo = request.form['titulo']
         descripcion = request.form['descripcion']
         
-        # Buscar si ya existe info para ese grado
         actividad = ActividadGrado.query.filter_by(grado=grado_id).first()
         
         if not actividad:
-            # Si no existe, creamos uno nuevo
             actividad = ActividadGrado(grado=grado_id)
             db.session.add(actividad)
         
-        # Actualizamos los datos
         actividad.titulo = titulo
         actividad.descripcion = descripcion
         actividad.fecha_actualizacion = datetime.utcnow()
@@ -1703,9 +1577,7 @@ def gestionar_grados():
         flash(f'¡Información de {grado_id}° actualizada!', 'success')
         return redirect(url_for('gestionar_grados'))
 
-    # Para mostrar la página de edición, cargamos lo que ya existe
     actividades = ActividadGrado.query.all()
-    # Lo convertimos a un diccionario para fácil acceso en el HTML: {1: actividad_1, 2: actividad_2...}
     info_grados = {a.grado: a for a in actividades}
     
     return render_template('admin/gestionar_grados.html', info_grados=info_grados)
@@ -1770,35 +1642,29 @@ def eliminar_plataforma(id):
     flash('Plataforma eliminada.', 'warning')
     return redirect(url_for('gestionar_plataformas'))
 
-# --- GESTIÓN DE ENTREGAS (CON FILTRO) ---
+# --- GESTIÓN DE ENTREGAS ---
 
 @app.route('/admin/entregas')
 @require_profesor
 def gestionar_entregas():
-    # 1. Capturamos el filtro de la URL (Ej: ?grado=6A)
     filtro = request.args.get('grado')
     
-    # 2. Iniciamos la consulta uniendo Entregas con Alumnos
-    # (Necesitamos 'join' para saber el grado del alumno que mandó la tarea)
     query = EntregaAlumno.query.join(UsuarioAlumno)
     
-    # 3. Aplicamos el filtro si existe
     if filtro and filtro != 'Todos':
         query = query.filter(UsuarioAlumno.grado_grupo == filtro)
     
-    # 4. Ordenamos: Primero las más recientes
     entregas = query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
     
     return render_template('admin/entregas_alumnos.html', 
                          entregas=entregas, 
                          filtro_actual=filtro)
 
-# --- GESTIÓN DE RECURSOS (ADMIN) ---
+# --- GESTIÓN DE RECURSOS ---
 
 @app.route('/admin/recursos')
 @require_profesor
 def gestionar_recursos():
-    # Ordenamos: lo más nuevo primero
     recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
     return render_template('admin/recursos.html', recursos=recursos)
 
@@ -1810,10 +1676,8 @@ def subir_recurso():
 
     if archivo and titulo:
         try:
-            # Validar y guardar archivo
             ruta_archivo, es_s3 = guardar_archivo(archivo)
             
-            # Detectar tipo de archivo
             ext = archivo.filename.split('.')[-1].lower()
             if ext == 'pdf':
                 tipo = 'PDF'
@@ -1822,20 +1686,17 @@ def subir_recurso():
             else:
                 tipo = 'OTRO'
 
-            # Guardar en BD
             nuevo = Recurso(
                 titulo=titulo, 
-                archivo_url=ruta_archivo,  # KEY de S3 o filename
+                archivo_url=ruta_archivo,
                 tipo_archivo=tipo
             )
             db.session.add(nuevo)
             db.session.commit()
             
             flash('Recurso publicado correctamente.', 'success')
-        except ValueError as e:
-            flash(f'Error en el archivo: {str(e)}', 'danger')
-        except Exception as e:
-            flash(f'Error al subir: {e}', 'danger')
+        except (FileValidationError, AppError) as e:
+            flash(f'Error: {str(e)}', 'danger')
             
     return redirect(url_for('gestionar_recursos'))
 
@@ -1843,57 +1704,42 @@ def subir_recurso():
 @require_profesor
 def eliminar_recurso(id):
     recurso = Recurso.query.get_or_404(id)
-    # Borramos de la base de datos (el archivo se queda en S3/Local por seguridad)
     db.session.delete(recurso)
     db.session.commit()
     flash('Recurso eliminado de la lista.', 'warning')
     return redirect(url_for('gestionar_recursos'))
 
-# --- RUTA PARA SERVIR ARCHIVOS LOCALES (IMPORTANTE) ---
-# Esta ruta permite ver las imágenes si están guardadas en tu PC
+# --- RUTAS PARA SERVIR ARCHIVOS ---
+
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
-# --- NUEVA RUTA PARA SERVIR ARCHIVOS DE S3 ---
-
 @app.route('/ver-archivo/<path:archivo_path>')
 def ver_archivo(archivo_path):
-    """
-    Sirve archivos tanto de S3 como locales.
-    Detecta automáticamente de dónde viene el archivo.
-    """
     try:
-        # Si el archivo_path contiene "uploads/" es de S3
         if archivo_path.startswith('uploads/'):
-            # Es un archivo de S3
-            if S3_ENDPOINT and S3_KEY and S3_SECRET:
-                file_stream, content_type = descargar_de_s3(archivo_path)
+            if s3_manager.is_configured:
+                file_stream, content_type = s3_manager.download_file(archivo_path)
                 
                 if file_stream:
-                    # Extraer el nombre del archivo
                     filename = archivo_path.split('/')[-1]
                     
                     return send_file(
                         file_stream,
                         mimetype=content_type,
-                        as_attachment=False,  # False = abrir en navegador
+                        as_attachment=False,
                         download_name=filename
                     )
-                else:
-                    flash('Error al cargar el archivo desde la nube', 'danger')
-                    return redirect(url_for('index'))
             else:
                 flash('Configuración de almacenamiento no disponible', 'danger')
                 return redirect(url_for('index'))
         
-        # Si no empieza con "uploads/", es un archivo local
         else:
             filename = archivo_path
             file_path = os.path.join(UPLOAD_FOLDER, filename)
             
             if os.path.exists(file_path):
-                # Detectar mimetype
                 if filename.endswith('.pdf'):
                     mimetype = 'application/pdf'
                 elif filename.endswith(('.doc', '.docx')):
@@ -1912,13 +1758,12 @@ def ver_archivo(archivo_path):
                 return redirect(url_for('index'))
                 
     except Exception as e:
-        print(f"❌ Error al servir archivo: {str(e)}")
+        logger.error(f"Error al servir archivo: {str(e)}")
         flash(f'Error al cargar el archivo: {str(e)}', 'danger')
         return redirect(url_for('index'))
 
 # --- SISTEMA DE BOLETAS Y REPORTES ---
 
-# 1. CONFIGURAR CRITERIOS (Qué evaluamos)
 @app.route('/admin/boletas/config', methods=['GET', 'POST'])
 @require_profesor
 def configurar_boletas():
@@ -1930,7 +1775,6 @@ def configurar_boletas():
         db.session.commit()
         flash('Criterio agregado correctamente.', 'success')
     
-    # Obtener todos los criterios ordenados por grado
     criterios = CriterioBoleta.query.order_by(CriterioBoleta.grado).all()
     return render_template('admin/boletas_config.html', criterios=criterios)
 
@@ -1942,35 +1786,26 @@ def borrar_criterio(id):
     db.session.commit()
     return redirect(url_for('configurar_boletas'))
 
-# --- GENERADOR DE BOLETA CON FILTRO ---
 @app.route('/admin/boletas/generar', methods=['GET', 'POST'])
 @require_profesor
 def generar_boleta():
     alumno = None
     criterios = []
     
-    # 1. NUEVO: Obtener el filtro de grupo (Ej: "6A")
     filtro_grado = request.args.get('filtro_grado')
-    
-    # 2. Query Base: Preparamos la consulta de alumnos
     query = UsuarioAlumno.query
     
-    # Si hay filtro, recortamos la lista
     if filtro_grado and filtro_grado != 'Todos':
         query = query.filter_by(grado_grupo=filtro_grado)
     
-    # Obtenemos los alumnos (ya sea todos o solo los del grupo filtrado)
     alumnos = query.order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
 
-    # 3. Lógica de Selección de Alumno (Igual que antes)
     alumno_id = request.args.get('alumno_id')
     if alumno_id:
         alumno = UsuarioAlumno.query.get_or_404(alumno_id)
-        # Extraer grado numérico para buscar criterios
         grado_num = ''.join(filter(str.isdigit, alumno.grado_grupo))
         criterios = CriterioBoleta.query.filter_by(grado=grado_num).all()
 
-    # 4. Lógica de Generación (POST) - Cuando le das a "Generar"
     if request.method == 'POST':
         datos_evaluacion = {}
         promedio = 0
@@ -1990,7 +1825,6 @@ def generar_boleta():
             promedio = round(total_puntos / conteo, 1)
         
         try:
-            # 🆕 GENERAR Y GUARDAR EL PDF
             file_url, buffer_pdf, nombre_archivo = generar_pdf_boleta(
                 alumno, 
                 datos_evaluacion, 
@@ -1999,7 +1833,6 @@ def generar_boleta():
                 periodo
             )
             
-            # 🆕 REGISTRAR EN LA BASE DE DATOS
             nueva_boleta = BoletaGenerada(
                 alumno_id=alumno.id,
                 archivo_url=file_url,
@@ -2014,7 +1847,6 @@ def generar_boleta():
             
             flash('✅ Boleta generada y guardada correctamente', 'success')
             
-            # 🆕 DESCARGAR el PDF directamente
             return send_file(
                 buffer_pdf,
                 mimetype='application/pdf',
@@ -2022,45 +1854,36 @@ def generar_boleta():
                 download_name=nombre_archivo
             )
             
-        except Exception as e:
-            print(f"❌ Error al generar boleta: {str(e)}")
+        except AppError as e:
+            logger.error(f"Error al generar boleta: {str(e)}")
             flash(f'Error al generar boleta: {str(e)}', 'danger')
             return redirect(url_for('generar_boleta'))
 
-    # Pasamos 'filtro_actual' al HTML para mantener el select en su lugar
     return render_template('admin/boleta_form.html', 
                          alumnos=alumnos, 
                          alumno_seleccionado=alumno, 
                          criterios=criterios,
                          filtro_actual=filtro_grado)
 
-# --- VER BOLETAS GENERADAS ---
 @app.route('/admin/boletas/historial')
 @require_profesor
 def ver_boletas_historial():
-    # Obtener filtros
     filtro_grado = request.args.get('grado', 'Todos')
     filtro_periodo = request.args.get('periodo', '')
     
-    # Query base con join para obtener datos del alumno
     query = BoletaGenerada.query.join(UsuarioAlumno)
     
-    # Aplicar filtro de grado
     if filtro_grado and filtro_grado != 'Todos':
         query = query.filter(UsuarioAlumno.grado_grupo == filtro_grado)
     
-    # Aplicar filtro de período
     if filtro_periodo:
         query = query.filter(BoletaGenerada.periodo.contains(filtro_periodo))
     
-    # Ordenar por fecha (más reciente primero)
     boletas = query.order_by(BoletaGenerada.fecha_generacion.desc()).all()
     
-    # Obtener lista de grupos únicos
     grupos_disponibles = db.session.query(UsuarioAlumno.grado_grupo).distinct().all()
     grupos_disponibles = sorted([g[0] for g in grupos_disponibles])
     
-    # Estadísticas
     total_boletas = BoletaGenerada.query.count()
     boletas_este_mes = BoletaGenerada.query.filter(
         BoletaGenerada.fecha_generacion >= date.today().replace(day=1)
@@ -2077,14 +1900,12 @@ def ver_boletas_historial():
 @app.route('/admin/boletas/descargar/<int:boleta_id>')
 @require_profesor
 def descargar_boleta_guardada(boleta_id):
-    """Descargar una boleta previamente generada"""
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
     
     try:
-        # Si está en S3
         if boleta.archivo_url and boleta.archivo_url.startswith('boletas/'):
-            if S3_ENDPOINT and S3_KEY and S3_SECRET:
-                file_stream, content_type = descargar_de_s3(boleta.archivo_url)
+            if s3_manager.is_configured:
+                file_stream, content_type = s3_manager.download_file(boleta.archivo_url)
                 
                 if file_stream:
                     return send_file(
@@ -2094,7 +1915,6 @@ def descargar_boleta_guardada(boleta_id):
                         download_name=boleta.nombre_archivo
                     )
         
-        # Si está guardado localmente
         return send_from_directory(
             os.path.join(UPLOAD_FOLDER, 'boletas'),
             boleta.nombre_archivo,
@@ -2102,48 +1922,38 @@ def descargar_boleta_guardada(boleta_id):
         )
         
     except Exception as e:
+        logger.error(f"Error al descargar boleta: {str(e)}")
         flash(f'Error al descargar boleta: {str(e)}', 'danger')
         return redirect(url_for('ver_boletas_historial'))
 
 @app.route('/admin/boletas/eliminar/<int:boleta_id>')
 @require_profesor
 def eliminar_boleta_guardada(boleta_id):
-    """Eliminar una boleta del registro"""
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
     
     try:
-        # Opcionalmente eliminar de S3
-        if boleta.archivo_url and boleta.archivo_url.startswith('boletas/') and S3_ENDPOINT and S3_KEY and S3_SECRET:
+        if boleta.archivo_url and boleta.archivo_url.startswith('boletas/') and s3_manager.is_configured:
             try:
-                s3 = boto3.client('s3',
-                                endpoint_url=S3_ENDPOINT,
-                                aws_access_key_id=S3_KEY,
-                                aws_secret_access_key=S3_SECRET,
-                                region_name='us-west-1')
-                s3.delete_object(Bucket=S3_BUCKET, Key=boleta.archivo_url)
-                print(f"🗑️ Boleta eliminada de S3: {boleta.archivo_url}")
-            except Exception as e:
-                print(f"⚠️ No se pudo eliminar de S3: {e}")
+                s3_manager.delete_file(boleta.archivo_url)
+                logger.info(f"🗑️ Boleta eliminada de S3: {boleta.archivo_url}")
+            except S3UploadError as e:
+                logger.warning(f"⚠️ No se pudo eliminar de S3: {e}")
         
-        # Eliminar registro de la base de datos
         db.session.delete(boleta)
         db.session.commit()
         flash('Boleta eliminada correctamente', 'success')
         
     except Exception as e:
+        logger.error(f"Error al eliminar boleta: {str(e)}")
         flash(f'Error al eliminar boleta: {str(e)}', 'danger')
     
     return redirect(url_for('ver_boletas_historial'))
 
 # --- INICIALIZADOR ---
 
-# ESTO ES LO NUEVO: Lo sacamos del "if" y lo ponemos solito.
-# Así Gunicorn lo leerá y creará las tablas en Neon al arrancar.
 with app.app_context():
     db.create_all()
-    # Ejecutar migración segura de fotos
     migrar_bd_fotos()
 
-# Esto se queda solo para cuando pruebas en tu PC
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

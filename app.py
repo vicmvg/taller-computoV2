@@ -254,20 +254,23 @@ def renovar_sesion():
     """Marca la sesión como permanente y la renueva en cada petición"""
     session.permanent = True
     session.modified = True
-
 # --- CONFIGURACIÓN DE BASE DE DATOS ---
+DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///escuela.db')
 
-# Obtener la URL de la variable de entorno
-database_url = os.environ.get('DATABASE_URL', 'sqlite:///taller.db')
+# Si viene de Heroku/Render con postgres://, cambiar a postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# FIX PARA RENDER/NEON: 
-# Si la URL comienza con "postgres://", la cambiamos a "postgresql://" 
-# porque SQLAlchemy moderno ya no acepta la versión corta.
-if database_url and database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
-
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# CONFIGURACIÓN DEL POOL DE CONEXIONES (EVITA ERRORES SSL EOF)
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,      # Verifica conexión antes de usarla
+    'pool_recycle': 300,         # Recicla conexiones cada 5 minutos
+    'pool_size': 10,             # Tamaño del pool
+    'max_overflow': 20           # Conexiones extras permitidas
+}
 
 db = SQLAlchemy(app)
 

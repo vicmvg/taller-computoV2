@@ -2,11 +2,13 @@ import os
 import boto3
 import qrcode
 import io  # Para manejar archivos en memoria
-from datetime import datetime, timedelta, date  # Añadido timedelta aquí
+import magic  # NUEVO: Para validación de archivos
+from datetime import datetime, timedelta, date
 from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps  # NUEVO: Para decoradores
 
 # --- NUEVOS IMPORTS PARA GENERAR PDF ---
 from reportlab.lib.pagesizes import letter, A4
@@ -26,6 +28,49 @@ TOKEN_MAESTRO = "treceT1gres"
 
 # NUEVO: La sesión expira tras 10 minutos de inactividad
 app.permanent_session_lifetime = timedelta(minutes=10)
+
+# NUEVO: Configuración de validación de archivos
+ALLOWED_EXTENSIONS = {
+    'images': {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'},
+    'documents': {'pdf', 'doc', 'docx', 'txt', 'odt', 'ppt', 'pptx', 'xls', 'xlsx'},
+    'archives': {'zip', 'rar', '7z'}
+}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+# --- DECORADORES DE SEGURIDAD MEJORADOS ---
+
+def require_profesor(f):
+    """Decorador para rutas exclusivas de profesores"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('tipo_usuario') != 'profesor' or 'user' not in session:
+            flash('Acceso restringido a profesores', 'danger')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_alumno(f):
+    """Decorador para rutas exclusivas de alumnos"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('tipo_usuario') != 'alumno' or 'alumno_id' not in session:
+            flash('Debes iniciar sesión como alumno', 'danger')
+            return redirect(url_for('login_alumnos'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_any_auth(f):
+    """Decorador para rutas que requieren cualquier tipo de autenticación"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'tipo_usuario' not in session:
+            flash('Debes iniciar sesión para acceder a esta página', 'danger')
+            if request.path.startswith('/admin'):
+                return redirect(url_for('login'))
+            else:
+                return redirect(url_for('login_alumnos'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # 🆕 RENOVAR SESIÓN EN CADA REQUEST
 @app.before_request
@@ -302,6 +347,94 @@ def descargar_de_s3(s3_key):
         print(f"❌ Error al descargar de S3: {str(e)}")
         return None, None
 
+def validate_file(file_stream, filename):
+    """Validación exhaustiva de archivos"""
+    # 1. Tamaño
+    file_stream.seek(0, 2)  # Ir al final
+    size = file_stream.tell()
+    file_stream.seek(0)  # Volver al inicio
+    
+    if size > MAX_FILE_SIZE:
+        return False, "Archivo demasiado grande (máx 50MB)"
+    
+    # 2. Extensión
+    ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+    if not ext:
+        return False, "Archivo sin extensión"
+    
+    # 3. Extensiones permitidas
+    allowed_all = set().union(*ALLOWED_EXTENSIONS.values())
+    if ext not in allowed_all:
+        return False, f"Extensión .{ext} no permitida"
+    
+    # 4. Magic number (verdadero tipo de archivo)
+    try:
+        file_content = file_stream.read(2048)
+        file_stream.seek(0)
+        
+        mime = magic.from_buffer(file_content, mime=True)
+        
+        # Mapeo de MIME types a extensiones permitidas
+        mime_to_ext = {
+            'image/png': 'png',
+            'image/jpeg': ['jpg', 'jpeg'],
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'image/bmp': 'bmp',
+            'application/pdf': 'pdf',
+            'application/msword': 'doc',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+            'application/vnd.ms-excel': 'xls',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/vnd.ms-powerpoint': 'ppt',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+            'text/plain': 'txt',
+            'application/zip': 'zip',
+            'application/x-rar-compressed': 'rar',
+            'application/x-7z-compressed': '7z',
+        }
+        
+        # Verificar que el MIME type sea permitido
+        if mime not in mime_to_ext:
+            return False, f"Tipo de archivo {mime} no permitido"
+        
+        # Verificar que extensión coincida con MIME real
+        expected_exts = mime_to_ext[mime]
+        if isinstance(expected_exts, list):
+            if ext not in expected_exts:
+                return False, f"Extensión .{ext} no coincide con tipo real {mime}"
+        elif ext != expected_exts:
+            # Para casos donde hay múltiples extensiones para un MIME type
+            if mime == 'image/jpeg' and ext in ['jpg', 'jpeg']:
+                pass  # jpg y jpeg son ambos JPEG
+            else:
+                return False, f"Extensión .{ext} no coincide con tipo real {mime}"
+            
+    except Exception as e:
+        print(f"⚠️ Magic number validation failed: {str(e)}")
+        # Si magic falla, confiamos en la extensión (ya validada arriba)
+    
+    # 5. Validar nombre del archivo (evitar nombres peligrosos)
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return False, "Nombre de archivo inválido"
+    
+    # 6. Validar contenido de texto (para archivos de texto)
+    if ext in ['txt', 'pdf', 'doc', 'docx']:
+        try:
+            # Leer primeros bytes para detectar binarios disfrazados
+            sample = file_stream.read(1024)
+            file_stream.seek(0)
+            
+            # Intentar decodificar como UTF-8
+            if b'\x00' in sample:
+                # Contiene null bytes, probablemente binario
+                if ext == 'txt':
+                    return False, "Archivo de texto contiene caracteres binarios"
+        except:
+            pass
+    
+    return True, "OK"
+
 def guardar_archivo(archivo):
     """
     Guarda archivo en S3 si hay credenciales, sino en carpeta local 'uploads'.
@@ -311,6 +444,11 @@ def guardar_archivo(archivo):
     
     print(f"\n📁 Intentando guardar archivo: {filename}")
     print(f"   S3_ENDPOINT configurado: {bool(S3_ENDPOINT)}")
+    
+    # Validar archivo antes de guardar
+    is_valid, message = validate_file(archivo, filename)
+    if not is_valid:
+        raise ValueError(f"Archivo inválido: {message}")
     
     # Intento de S3
     if S3_ENDPOINT and S3_KEY and S3_SECRET:
@@ -354,7 +492,8 @@ def guardar_archivo(archivo):
     
     # Fallback Local
     archivo.seek(0)
-    archivo.save(os.path.join(UPLOAD_FOLDER, filename))
+    local_path = os.path.join(UPLOAD_FOLDER, filename)
+    archivo.save(local_path)
     print(f"   💾 Archivo guardado localmente: {filename}")
     
     # Retornamos (filename, False) para indicar que es local
@@ -773,11 +912,9 @@ def logout_alumnos():
 # --- RUTA PARA SUBIR FOTO DE PERFIL (ALUMNO) ---
 
 @app.route('/alumnos/perfil/foto', methods=['POST'])
+@require_alumno
 def actualizar_foto_perfil():
     """Permite al alumno subir/cambiar su foto de perfil"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'alumno':
-        return redirect(url_for('login_alumnos'))
     
     if 'foto' not in request.files:
         flash('No se seleccionó ninguna foto', 'danger')
@@ -787,14 +924,6 @@ def actualizar_foto_perfil():
     
     if foto.filename == '':
         flash('No se seleccionó ninguna foto', 'danger')
-        return redirect(url_for('panel_alumnos'))
-    
-    # Validar que sea una imagen
-    extensiones_permitidas = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-    extension = foto.filename.rsplit('.', 1)[1].lower() if '.' in foto.filename else ''
-    
-    if extension not in extensiones_permitidas:
-        flash('Solo se permiten imágenes (PNG, JPG, JPEG, GIF, WEBP)', 'danger')
         return redirect(url_for('panel_alumnos'))
     
     try:
@@ -808,6 +937,8 @@ def actualizar_foto_perfil():
         
         flash('¡Foto de perfil actualizada correctamente! 🎉', 'success')
         
+    except ValueError as e:
+        flash(f'Error en la foto: {str(e)}', 'danger')
     except Exception as e:
         flash(f'Error al subir la foto: {str(e)}', 'danger')
     
@@ -816,12 +947,8 @@ def actualizar_foto_perfil():
 # --- RUTAS DE ADMINISTRACIÓN ---
 
 @app.route('/admin')
+@require_profesor
 def admin_dashboard():
-    # VERIFICACIÓN DE SEGURIDAD usando la función helper
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-
     equipos = Equipo.query.count()
     pendientes = Mantenimiento.query.filter_by(fecha_reparacion=None).count()
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
@@ -841,11 +968,8 @@ def admin_dashboard():
 # --- RUTAS DEL CHAT (SISTEMA DE MENSAJERÍA) ---
 # 1. INTERRUPTOR DEL PROFE
 @app.route('/admin/chat/toggle')
+@require_profesor
 def toggle_chat():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Buscar la configuración, si no existe la creamos
     config = Configuracion.query.get('chat_activo')
     if not config:
@@ -865,11 +989,8 @@ def toggle_chat():
 
 # 2. ENVIAR MENSAJE (ALUMNO)
 @app.route('/api/chat/enviar', methods=['POST'])
+@require_alumno
 def enviar_mensaje():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'alumno':
-        return {'status': 'error', 'msg': 'No logueado'}, 403
-    
     # Verificar si el chat está activo
     config = Configuracion.query.get('chat_activo')
     if config and config.valor == 'False':
@@ -893,11 +1014,8 @@ def enviar_mensaje():
 
 # 3. LEER MENSAJES (ALUMNO)
 @app.route('/api/chat/obtener')
+@require_alumno
 def obtener_mensajes():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'alumno':
-        return {'status': 'error'}, 403
-
     # Obtener mensajes SOLO de mi grupo (últimos 50)
     mi_grupo = session['alumno_grado']
     mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo).order_by(Mensaje.fecha.asc()).all()
@@ -925,11 +1043,8 @@ def obtener_mensajes():
 # --- RUTAS DE GESTIÓN DE ALUMNOS Y ASISTENCIA ---
 
 @app.route('/admin/alumnos')
+@require_profesor
 def gestionar_alumnos():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # 1. Capturar filtro
     filtro = request.args.get('grado') # Ej: '6A'
     
@@ -952,11 +1067,8 @@ def gestionar_alumnos():
                          fecha_hoy=date.today().isoformat())
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
+@require_profesor
 def agregar_alumno():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     username = request.form['username']
     nombre_completo = request.form['nombre_completo']
     password = request.form['password']
@@ -988,11 +1100,8 @@ def agregar_alumno():
     return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/alumnos/editar/<int:id>', methods=['POST'])
+@require_profesor
 def editar_alumno(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     alumno = UsuarioAlumno.query.get_or_404(id)
     
     alumno.nombre_completo = request.form['nombre_completo']
@@ -1010,11 +1119,8 @@ def editar_alumno(id):
     return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/alumnos/eliminar/<int:id>')
+@require_profesor
 def eliminar_alumno(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     alumno = UsuarioAlumno.query.get_or_404(id)
     nombre = alumno.nombre_completo
     db.session.delete(alumno)
@@ -1024,11 +1130,8 @@ def eliminar_alumno(id):
     return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/asistencia/tomar', methods=['POST'])
+@require_profesor
 def tomar_asistencia():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Recibimos la fecha del formulario (o usamos hoy)
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
@@ -1054,11 +1157,8 @@ def tomar_asistencia():
     return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
 @app.route('/admin/reporte-asistencia/<grupo>')
+@require_profesor
 def generar_reporte_asistencia(grupo):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Obtener fechas del reporte
     fecha_inicio = request.args.get('fecha_inicio', date.today().isoformat())
     fecha_fin = request.args.get('fecha_fin', None)
@@ -1087,12 +1187,9 @@ def generar_reporte_asistencia(grupo):
         return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/descargar-reporte/<path:filename>')
+@require_profesor
 def descargar_reporte(filename):
     """Ruta alternativa para descargar reportes guardados localmente"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     try:
         return send_from_directory(
             os.path.join(UPLOAD_FOLDER, 'reportes'),
@@ -1104,11 +1201,8 @@ def descargar_reporte(filename):
         return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/alumnos/entregas')
+@require_profesor
 def ver_entregas_alumnos():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Obtener todas las entregas ordenadas por fecha
     entregas = EntregaAlumno.query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
     
@@ -1124,11 +1218,8 @@ def ver_entregas_alumnos():
                          entregas_por_alumno=entregas_por_alumno)
 
 @app.route('/admin/alumnos/calificar/<int:id>', methods=['POST'])
+@require_profesor
 def calificar_entrega(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     entrega = EntregaAlumno.query.get_or_404(id)
     entrega.estrellas = int(request.form['estrellas'])
     entrega.comentarios = request.form['comentarios']
@@ -1141,12 +1232,9 @@ def calificar_entrega(id):
 # --- RUTAS PARA VER REPORTES GENERADOS ---
 
 @app.route('/admin/reportes-asistencia')
+@require_profesor
 def ver_reportes_asistencia():
     """Página para ver todos los reportes generados con filtros"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Obtener filtros
     filtro_grupo = request.args.get('grupo', 'Todos')
     filtro_mes = request.args.get('mes', '')
@@ -1202,12 +1290,9 @@ def ver_reportes_asistencia():
                          fecha_hoy=date.today().isoformat())
 
 @app.route('/admin/descargar-reporte/<int:reporte_id>')
+@require_profesor
 def descargar_reporte_guardado(reporte_id):
     """Descargar un reporte previamente generado"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
     
     try:
@@ -1246,12 +1331,9 @@ def descargar_reporte_guardado(reporte_id):
         return redirect(url_for('ver_reportes_asistencia'))
 
 @app.route('/admin/eliminar-reporte/<int:reporte_id>')
+@require_profesor
 def eliminar_reporte(reporte_id):
     """Eliminar un reporte del registro (no borra el archivo físico)"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
     
     try:
@@ -1282,11 +1364,8 @@ def eliminar_reporte(reporte_id):
 # --- RUTAS DE ALUMNOS (PANEL Y SUBIDA DE TAREAS) ---
 
 @app.route('/alumnos')
+@require_alumno
 def panel_alumnos():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'alumno':
-        return redirect(url_for('login_alumnos'))
-    
     alumno = UsuarioAlumno.query.get(session['alumno_id'])
     
     # 1. Tareas entregadas
@@ -1314,12 +1393,8 @@ def panel_alumnos():
                          entregas_calificadas=entregas_calificadas)
 
 @app.route('/alumnos/subir', methods=['POST'])
+@require_alumno
 def subir_tarea():
-    # SEGURIDAD: Verificar que esté logueado como alumno usando la función helper
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'alumno':
-        return redirect(url_for('login_alumnos'))
-    
     if 'archivo' not in request.files:
         flash('No se subió archivo', 'danger')
         return redirect(url_for('panel_alumnos'))
@@ -1333,40 +1408,40 @@ def subir_tarea():
         # Obtener datos del alumno
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         
-        # CAMBIO AQUÍ: Ahora guardar_archivo retorna tupla
-        ruta, es_s3 = guardar_archivo(archivo)
+        try:
+            # CAMBIO AQUÍ: Ahora guardar_archivo retorna tupla y valida el archivo
+            ruta, es_s3 = guardar_archivo(archivo)
+            
+            # Guardar en DB
+            nueva_entrega = EntregaAlumno(
+                alumno_id=alumno.id,
+                nombre_alumno=alumno.nombre_completo,
+                grado_grupo=alumno.grado_grupo,
+                archivo_url=ruta  # Guardamos la KEY de S3 o filename local
+            )
+            db.session.add(nueva_entrega)
+            db.session.commit()
+            
+            flash('¡Tarea enviada con éxito! El profesor la revisará pronto.', 'success')
+        except ValueError as e:
+            flash(f'Error en el archivo: {str(e)}', 'danger')
+        except Exception as e:
+            flash(f'Error al subir archivo: {str(e)}', 'danger')
         
-        # Guardar en DB
-        nueva_entrega = EntregaAlumno(
-            alumno_id=alumno.id,
-            nombre_alumno=alumno.nombre_completo,
-            grado_grupo=alumno.grado_grupo,
-            archivo_url=ruta  # Guardamos la KEY de S3 o filename local
-        )
-        db.session.add(nueva_entrega)
-        db.session.commit()
-        
-        flash('¡Tarea enviada con éxito! El profesor la revisará pronto.', 'success')
         return redirect(url_for('panel_alumnos'))
 
 # --- RUTAS DE INVENTARIO (CRUD) ---
 
 @app.route('/admin/inventario')
+@require_profesor
 def inventario():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-        
     # Obtener todos los equipos ordenados por ID
     equipos = Equipo.query.order_by(Equipo.id.desc()).all()
     return render_template('admin/inventario.html', equipos=equipos)
 
 @app.route('/admin/inventario/agregar', methods=['POST'])
+@require_profesor
 def agregar_equipo():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     nuevo_equipo = Equipo(
         tipo=request.form['tipo'],
         marca=request.form['marca'],
@@ -1381,11 +1456,8 @@ def agregar_equipo():
     return redirect(url_for('inventario'))
 
 @app.route('/admin/inventario/eliminar/<int:id>')
+@require_profesor
 def eliminar_equipo(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-        
     equipo = Equipo.query.get_or_404(id)
     db.session.delete(equipo)
     db.session.commit()
@@ -1393,23 +1465,16 @@ def eliminar_equipo(id):
     return redirect(url_for('inventario'))
 
 @app.route('/admin/generar_qr/<int:id>')
+@require_profesor
 def generar_qr(id):
-    # VERIFICACIÓN DE SEGURIDAD usando la función helper
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Lógica simple para generar QR en memoria (o guardar imagen)
     equipo = Equipo.query.get_or_404(id)
     # Aquí luego implementaremos la generación real de la imagen QR
     return f"QR generado para {equipo.tipo} {equipo.marca}"
 
 @app.route('/admin/generar_qr_img/<int:id>')
+@require_profesor
 def generar_qr_img(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-
     equipo = Equipo.query.get_or_404(id)
 
     # Datos que llevará el QR (Simple y útil)
@@ -1431,11 +1496,8 @@ def generar_qr_img(id):
 # --- RUTAS DE MANTENIMIENTO ---
 
 @app.route('/admin/mantenimiento')
+@require_profesor
 def mantenimiento():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-        
     # Obtener reportes activos (sin reparar) y el historial (reparados)
     pendientes = Mantenimiento.query.filter_by(fecha_reparacion=None).all()
     historial = Mantenimiento.query.filter(Mantenimiento.fecha_reparacion != None).order_by(Mantenimiento.fecha_reparacion.desc()).limit(10).all()
@@ -1446,11 +1508,8 @@ def mantenimiento():
     return render_template('admin/mantenimiento.html', pendientes=pendientes, historial=historial, equipos=equipos)
 
 @app.route('/admin/mantenimiento/reportar', methods=['POST'])
+@require_profesor
 def reportar_falla():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     equipo_id = request.form['equipo_id']
     descripcion = request.form['descripcion']
     
@@ -1467,11 +1526,8 @@ def reportar_falla():
     return redirect(url_for('mantenimiento'))
 
 @app.route('/admin/mantenimiento/solucionar', methods=['POST'])
+@require_profesor
 def solucionar_falla():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-        
     reporte_id = request.form['reporte_id']
     solucion = request.form['solucion']
     
@@ -1490,21 +1546,15 @@ def solucionar_falla():
 # --- RUTAS DE ANUNCIOS ---
 
 @app.route('/admin/anuncios')
+@require_profesor
 def gestionar_anuncios():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Ordenar por fecha, el más nuevo arriba
     anuncios = Anuncio.query.order_by(Anuncio.fecha.desc()).all()
     return render_template('admin/anuncios.html', anuncios=anuncios)
 
 @app.route('/admin/anuncios/publicar', methods=['POST'])
+@require_profesor
 def publicar_anuncio():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     titulo = request.form['titulo']
     contenido = request.form['contenido']
     
@@ -1516,11 +1566,8 @@ def publicar_anuncio():
     return redirect(url_for('gestionar_anuncios'))
 
 @app.route('/admin/anuncios/eliminar/<int:id>')
+@require_profesor
 def eliminar_anuncio(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-        
     anuncio = Anuncio.query.get_or_404(id)
     db.session.delete(anuncio)
     db.session.commit()
@@ -1530,20 +1577,15 @@ def eliminar_anuncio(id):
 # --- RUTAS DE CUESTIONARIOS ---
 
 @app.route('/admin/cuestionarios')
+@require_profesor
 def gestionar_cuestionarios():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
     # Mostrar todos
     cuestionarios = Cuestionario.query.order_by(Cuestionario.fecha.desc()).all()
     return render_template('admin/cuestionarios.html', cuestionarios=cuestionarios)
 
 @app.route('/admin/cuestionarios/publicar', methods=['POST'])
+@require_profesor
 def publicar_cuestionario():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # NUEVA LÓGICA: El examen va para un grupo específico
     grado = request.form['grado'] # Ej: "6"
     grupo = request.form['grupo'] # Ej: "A"
@@ -1560,11 +1602,8 @@ def publicar_cuestionario():
     return redirect(url_for('gestionar_cuestionarios'))
 
 @app.route('/admin/cuestionarios/eliminar/<int:id>')
+@require_profesor
 def eliminar_cuestionario(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     item = Cuestionario.query.get_or_404(id)
     db.session.delete(item)
     db.session.commit()
@@ -1574,21 +1613,15 @@ def eliminar_cuestionario(id):
 # --- GESTIÓN DEL BANCO DE CUESTIONARIOS ---
 
 @app.route('/admin/banco')
+@require_profesor
 def gestionar_banco():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Ordenar por fecha de creación
     banco = BancoCuestionario.query.order_by(BancoCuestionario.fecha_creacion.desc()).all()
     return render_template('admin/Banco_cuestionarios.html', banco=banco)
 
 @app.route('/admin/banco/agregar', methods=['POST'])
+@require_profesor
 def agregar_al_banco():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     nuevo = BancoCuestionario(
         titulo=request.form['titulo'],
         url=request.form['url']
@@ -1599,11 +1632,8 @@ def agregar_al_banco():
     return redirect(url_for('gestionar_banco'))
 
 @app.route('/admin/banco/eliminar/<int:id>')
+@require_profesor
 def eliminar_del_banco(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     item = BancoCuestionario.query.get_or_404(id)
     db.session.delete(item)
     db.session.commit()
@@ -1612,11 +1642,8 @@ def eliminar_del_banco(id):
 
 # --- LA MAGIA: ASIGNAR DESDE EL BANCO ---
 @app.route('/admin/banco/asignar', methods=['POST'])
+@require_profesor
 def asignar_desde_banco():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # 1. Obtenemos el ID de la plantilla y el grupo destino
     plantilla_id = request.form['plantilla_id']
     grado = request.form['grado']
@@ -1652,11 +1679,8 @@ def ver_grado(numero_grado):
 # --- RUTA ADMIN PARA EDITAR GRADOS ---
 
 @app.route('/admin/grados', methods=['GET', 'POST'])
+@require_profesor
 def gestionar_grados():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-        
     if request.method == 'POST':
         grado_id = int(request.form['grado'])
         titulo = request.form['titulo']
@@ -1689,20 +1713,14 @@ def gestionar_grados():
 # --- GESTIÓN DE HORARIOS ---
 
 @app.route('/admin/horarios')
+@require_profesor
 def gestionar_horarios():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     horarios = Horario.query.all()
     return render_template('admin/horarios.html', horarios=horarios)
 
 @app.route('/admin/horarios/agregar', methods=['POST'])
+@require_profesor
 def agregar_horario():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     nuevo = Horario(
         dia=request.form['dia'],
         grados=request.form['grados'],
@@ -1714,11 +1732,8 @@ def agregar_horario():
     return redirect(url_for('gestionar_horarios'))
 
 @app.route('/admin/horarios/eliminar/<int:id>')
+@require_profesor
 def eliminar_horario(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     horario = Horario.query.get_or_404(id)
     db.session.delete(horario)
     db.session.commit()
@@ -1728,20 +1743,14 @@ def eliminar_horario(id):
 # --- GESTIÓN DE PLATAFORMAS ---
 
 @app.route('/admin/plataformas')
+@require_profesor
 def gestionar_plataformas():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     plataformas = Plataforma.query.all()
     return render_template('admin/plataformas.html', plataformas=plataformas)
 
 @app.route('/admin/plataformas/agregar', methods=['POST'])
+@require_profesor
 def agregar_plataforma():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     nueva = Plataforma(
         nombre=request.form['nombre'],
         url=request.form['url'],
@@ -1753,11 +1762,8 @@ def agregar_plataforma():
     return redirect(url_for('gestionar_plataformas'))
 
 @app.route('/admin/plataformas/eliminar/<int:id>')
+@require_profesor
 def eliminar_plataforma(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     p = Plataforma.query.get_or_404(id)
     db.session.delete(p)
     db.session.commit()
@@ -1767,11 +1773,8 @@ def eliminar_plataforma(id):
 # --- GESTIÓN DE ENTREGAS (CON FILTRO) ---
 
 @app.route('/admin/entregas')
+@require_profesor
 def gestionar_entregas():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # 1. Capturamos el filtro de la URL (Ej: ?grado=6A)
     filtro = request.args.get('grado')
     
@@ -1793,27 +1796,21 @@ def gestionar_entregas():
 # --- GESTIÓN DE RECURSOS (ADMIN) ---
 
 @app.route('/admin/recursos')
+@require_profesor
 def gestionar_recursos():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Ordenamos: lo más nuevo primero
     recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
     return render_template('admin/recursos.html', recursos=recursos)
 
 @app.route('/admin/recursos/subir', methods=['POST'])
+@require_profesor
 def subir_recurso():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     archivo = request.files.get('archivo')
     titulo = request.form.get('titulo')
 
     if archivo and titulo:
         try:
-            # CAMBIO: Ahora recibimos tupla
+            # Validar y guardar archivo
             ruta_archivo, es_s3 = guardar_archivo(archivo)
             
             # Detectar tipo de archivo
@@ -1835,17 +1832,16 @@ def subir_recurso():
             db.session.commit()
             
             flash('Recurso publicado correctamente.', 'success')
+        except ValueError as e:
+            flash(f'Error en el archivo: {str(e)}', 'danger')
         except Exception as e:
             flash(f'Error al subir: {e}', 'danger')
             
     return redirect(url_for('gestionar_recursos'))
 
 @app.route('/admin/recursos/eliminar/<int:id>')
+@require_profesor
 def eliminar_recurso(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     recurso = Recurso.query.get_or_404(id)
     # Borramos de la base de datos (el archivo se queda en S3/Local por seguridad)
     db.session.delete(recurso)
@@ -1924,11 +1920,8 @@ def ver_archivo(archivo_path):
 
 # 1. CONFIGURAR CRITERIOS (Qué evaluamos)
 @app.route('/admin/boletas/config', methods=['GET', 'POST'])
+@require_profesor
 def configurar_boletas():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     if request.method == 'POST':
         grado = request.form['grado']
         criterio = request.form['criterio']
@@ -1942,10 +1935,8 @@ def configurar_boletas():
     return render_template('admin/boletas_config.html', criterios=criterios)
 
 @app.route('/admin/boletas/borrar-criterio/<int:id>')
+@require_profesor
 def borrar_criterio(id):
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
     c = CriterioBoleta.query.get_or_404(id)
     db.session.delete(c)
     db.session.commit()
@@ -1953,11 +1944,8 @@ def borrar_criterio(id):
 
 # --- GENERADOR DE BOLETA CON FILTRO ---
 @app.route('/admin/boletas/generar', methods=['GET', 'POST'])
+@require_profesor
 def generar_boleta():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     alumno = None
     criterios = []
     
@@ -2048,11 +2036,8 @@ def generar_boleta():
 
 # --- VER BOLETAS GENERADAS ---
 @app.route('/admin/boletas/historial')
+@require_profesor
 def ver_boletas_historial():
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     # Obtener filtros
     filtro_grado = request.args.get('grado', 'Todos')
     filtro_periodo = request.args.get('periodo', '')
@@ -2090,12 +2075,9 @@ def ver_boletas_historial():
                          boletas_este_mes=boletas_este_mes)
 
 @app.route('/admin/boletas/descargar/<int:boleta_id>')
+@require_profesor
 def descargar_boleta_guardada(boleta_id):
     """Descargar una boleta previamente generada"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
     
     try:
@@ -2124,12 +2106,9 @@ def descargar_boleta_guardada(boleta_id):
         return redirect(url_for('ver_boletas_historial'))
 
 @app.route('/admin/boletas/eliminar/<int:boleta_id>')
+@require_profesor
 def eliminar_boleta_guardada(boleta_id):
     """Eliminar una boleta del registro"""
-    user_info = get_current_user()
-    if not user_info or user_info[0] != 'profesor':
-        return redirect(url_for('login'))
-    
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
     
     try:

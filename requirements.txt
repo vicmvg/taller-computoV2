@@ -7,3 +7,4 @@ qrcode
 pillow
 werkzeug
 reportlab
+python-magic-bin==0.4.14

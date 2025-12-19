@@ -604,13 +604,13 @@ def obtener_estadisticas_asistencia(alumnos_ids, fecha_inicio_obj, fecha_fin_obj
     Obtiene estadísticas de asistencia optimizadas con una sola consulta
     Evita el problema N+1 queries
     """
-    # Construir la consulta base
+    # Construir la consulta base con UPPER() para normalizar comparaciones
     query = db.session.query(
         Asistencia.alumno_id,
-        func.count(case((Asistencia.estado == 'P', 1))).label('presentes'),
-        func.count(case((Asistencia.estado == 'F', 1))).label('faltas'),
-        func.count(case((Asistencia.estado == 'R', 1))).label('retardos'),
-        func.count(case((Asistencia.estado == 'J', 1))).label('justificados'),
+        func.count(case((func.upper(Asistencia.estado) == 'P', 1))).label('presentes'),
+        func.count(case((func.upper(Asistencia.estado) == 'F', 1))).label('faltas'),
+        func.count(case((func.upper(Asistencia.estado) == 'R', 1))).label('retardos'),
+        func.count(case((func.upper(Asistencia.estado) == 'J', 1))).label('justificados'),
         func.count(Asistencia.id).label('total')
     ).filter(
         Asistencia.alumno_id.in_(alumnos_ids),
@@ -1240,21 +1240,43 @@ def tomar_asistencia():
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
+    contador_guardados = 0
+    
     for key, value in request.form.items():
         if key.startswith('asistencia_'):
             alumno_id = int(key.split('_')[1])
-            estado = value
+            
+            # ✅ NORMALIZAR: Asegurar que siempre sea mayúscula
+            estado = value.upper().strip()
+            
+            # ✅ VALIDAR: Solo permitir valores válidos
+            if estado not in ['P', 'F', 'R', 'J']:
+                logger.warning(f"⚠️ Estado inválido recibido: '{value}' para alumno {alumno_id}")
+                continue  # Saltar este registro
             
             registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
             
             if registro:
+                # Actualizar registro existente
                 registro.estado = estado
+                logger.info(f"📝 Actualizado: Alumno {alumno_id} = {estado}")
             else:
+                # Crear nuevo registro
                 nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
                 db.session.add(nuevo)
+                logger.info(f"➕ Creado: Alumno {alumno_id} = {estado}")
+            
+            contador_guardados += 1
     
-    db.session.commit()
-    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
+    try:
+        db.session.commit()
+        logger.info(f"✅ Asistencia guardada: {contador_guardados} registros para {fecha_str}")
+        flash(f'✅ Asistencia del día {fecha_str} guardada correctamente ({contador_guardados} alumnos).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"❌ Error al guardar asistencia: {str(e)}")
+        flash(f'❌ Error al guardar asistencia: {str(e)}', 'danger')
+    
     return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
 @app.route('/admin/reporte-asistencia/<grupo>')

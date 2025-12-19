@@ -136,7 +136,7 @@
                         <div class="card bg-primary text-white">
                             <div class="card-body">
                                 <h5 class="card-title">Total Entregas</h5>
-                                <h2>{{ entregas|length }}</h2>
+                                <h2>{{ entregas.total }}</h2>
                             </div>
                         </div>
                     </div>
@@ -144,15 +144,27 @@
                         <div class="card bg-success text-white">
                             <div class="card-body">
                                 <h5 class="card-title">Calificadas</h5>
-                                <h2>{{ entregas|selectattr('estrellas', 'gt', 0)|list|length }}</h2>
+                                <h2>
+                                    {% if entregas.items %}
+                                        {{ entregas.items|selectattr('estrellas', 'gt', 0)|list|length }}
+                                    {% else %}
+                                        0
+                                    {% endif %}
+                                </h2>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="card bg-warning text-dark">
+                        <div class="card bg-warning text-white">
                             <div class="card-body">
                                 <h5 class="card-title">Pendientes</h5>
-                                <h2>{{ entregas|selectattr('estrellas', 'equalto', 0)|list|length }}</h2>
+                                <h2>
+                                    {% if entregas.items %}
+                                        {{ entregas.items|selectattr('estrellas', 'equalto', 0)|list|length }}
+                                    {% else %}
+                                        0
+                                    {% endif %}
+                                </h2>
                             </div>
                         </div>
                     </div>
@@ -161,9 +173,13 @@
                             <div class="card-body">
                                 <h5 class="card-title">Promedio</h5>
                                 <h2>
-                                    {% set calificadas = entregas|selectattr('estrellas', 'gt', 0)|list %}
-                                    {% if calificadas %}
-                                        {{ (calificadas|sum(attribute='estrellas') / calificadas|length)|round(1) }}
+                                    {% if entregas.items %}
+                                        {% set calificadas = entregas.items|selectattr('estrellas', 'gt', 0)|list %}
+                                        {% if calificadas %}
+                                            {{ "%.1f"|format((calificadas|sum(attribute='estrellas')) / calificadas|length) }} ⭐
+                                        {% else %}
+                                            -
+                                        {% endif %}
                                     {% else %}
                                         0
                                     {% endif %}
@@ -174,7 +190,7 @@
                 </div>
                 
                 <!-- All Deliveries Table -->
-                {% if entregas %}
+                {% if entregas.items %}
                 <div class="card">
                     <div class="card-body">
                         <div class="table-responsive">
@@ -191,7 +207,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for entrega in entregas %}
+                                    {% for entrega in entregas.items %}
                                     <tr>
                                         <td>{{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') }}</td>
                                         <td>{{ entrega.nombre_alumno }}</td>

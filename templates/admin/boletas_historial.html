@@ -72,7 +72,7 @@
     <!-- Tabla de Boletas -->
     <div class="card">
         <div class="card-body">
-            {% if boletas %}
+            {% if boletas.items %}
             <div class="table-responsive">
                 <table class="table table-hover">
                     <thead class="table-dark">
@@ -88,7 +88,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for boleta in boletas %}
+                        {% for boleta in boletas.items %}
                         <tr>
                             <td>{{ loop.index }}</td>
                             <td>

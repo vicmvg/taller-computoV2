@@ -24,9 +24,6 @@ from io import BytesIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-# --- OPTIMIZACIONES N+1 QUERIES ---
-from sqlalchemy import func, case, or_
-
 # --- CONFIGURACIÓN DE LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -527,117 +524,6 @@ def guardar_archivo(archivo):
         logger.error(f"Error general al guardar archivo: {str(e)}")
         raise AppError(f"Error al guardar archivo: {str(e)}")
 
-def guardar_archivo_con_transaccion(archivo, entidad_db):
-    """
-    Guarda archivo con transacción atómica para evitar archivos huérfanos.
-    Si falla el commit, elimina el archivo de S3.
-    """
-    filename = secure_filename(archivo.filename)
-    s3_key = None
-    archivo_local = False
-    
-    try:
-        # Validar archivo
-        file_validator.validate(archivo, filename)
-        
-        # Intento de S3
-        if s3_manager.is_configured:
-            try:
-                logger.info(f"☁️ Intentando subir a iDrive e2...")
-                
-                # Detectar tipo de contenido
-                content_type = archivo.content_type or 'application/octet-stream'
-                s3_key = f"uploads/{filename}"
-                
-                # Subir a S3
-                archivo.seek(0)
-                s3_manager.upload_file(archivo, s3_key, content_type)
-                
-                logger.info(f"✅ Archivo subido exitosamente a S3: {s3_key}")
-                ruta_archivo = s3_key
-                
-            except S3UploadError as e:
-                logger.warning(f"❌ Error al subir a S3: {str(e)}")
-                logger.info("💾 Guardando localmente como fallback...")
-                flash('Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
-                archivo_local = True
-        else:
-            logger.info("⚠️ Credenciales S3 incompletas. Guardando localmente...")
-            archivo_local = True
-        
-        # Fallback Local
-        if archivo_local:
-            archivo.seek(0)
-            local_path = os.path.join(UPLOAD_FOLDER, filename)
-            archivo.save(local_path)
-            logger.info(f"💾 Archivo guardado localmente: {filename}")
-            ruta_archivo = filename
-        
-        # Actualizar entidad con la ruta del archivo
-        if hasattr(entidad_db, 'archivo_url'):
-            entidad_db.archivo_url = ruta_archivo
-        
-        # Guardar en base de datos
-        if entidad_db.id is None:
-            db.session.add(entidad_db)
-        db.session.commit()
-        
-        logger.info(f"✅ Transacción completada: {filename}")
-        return (ruta_archivo, not archivo_local)
-        
-    except Exception as e:
-        # ROLLBACK: Limpiar archivos huérfanos
-        logger.error(f"❌ Error en transacción: {str(e)}")
-        
-        try:
-            if s3_key and s3_manager.is_configured:
-                s3_manager.delete_file(s3_key)
-                logger.info(f"🗑️ Archivo huérfano eliminado de S3: {s3_key}")
-        except Exception as s3_error:
-            logger.error(f"⚠️ No se pudo limpiar archivo de S3: {str(s3_error)}")
-        
-        db.session.rollback()
-        raise AppError(f"Error al guardar archivo: {str(e)}")
-
-def obtener_estadisticas_asistencia(alumnos_ids, fecha_inicio_obj, fecha_fin_obj=None):
-    """
-    Obtiene estadísticas de asistencia optimizadas con una sola consulta
-    Evita el problema N+1 queries
-    """
-    # Construir la consulta base con UPPER() para normalizar comparaciones
-    query = db.session.query(
-        Asistencia.alumno_id,
-        func.count(case((func.upper(Asistencia.estado) == 'P', 1))).label('presentes'),
-        func.count(case((func.upper(Asistencia.estado) == 'F', 1))).label('faltas'),
-        func.count(case((func.upper(Asistencia.estado) == 'R', 1))).label('retardos'),
-        func.count(case((func.upper(Asistencia.estado) == 'J', 1))).label('justificados'),
-        func.count(Asistencia.id).label('total')
-    ).filter(
-        Asistencia.alumno_id.in_(alumnos_ids),
-        Asistencia.fecha >= fecha_inicio_obj
-    )
-    
-    if fecha_fin_obj:
-        query = query.filter(Asistencia.fecha <= fecha_fin_obj)
-    
-    # Agrupar por alumno
-    query = query.group_by(Asistencia.alumno_id)
-    
-    # Ejecutar consulta y convertir a diccionario para acceso rápido
-    resultados = query.all()
-    estadisticas = {}
-    
-    for r in resultados:
-        estadisticas[r.alumno_id] = {
-            'presentes': r.presentes,
-            'faltas': r.faltas,
-            'retardos': r.retardos,
-            'justificados': r.justificados,
-            'total': r.total
-        }
-    
-    return estadisticas
-
 def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
     """
     Genera un PDF con el reporte de asistencia y lo guarda en S3
@@ -684,36 +570,33 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         else:
             fecha_inicio_obj = fecha_inicio
         
-        # Obtener alumnos del grupo
         alumnos = UsuarioAlumno.query.filter_by(grado_grupo=grupo).all()
-        alumnos_ids = [a.id for a in alumnos]
-        
-        # Obtener estadísticas optimizadas con una sola consulta
-        estadisticas = obtener_estadisticas_asistencia(
-            alumnos_ids, 
-            fecha_inicio_obj, 
-            datetime.strptime(fecha_fin, '%Y-%m-%d').date() if fecha_fin else None
-        )
         
         data = [['#', 'Nombre del Alumno', 'Presente', 'Falta', 'Retardo', 'Justificado', 'Total']]
         
         for idx, alumno in enumerate(alumnos, 1):
-            stats = estadisticas.get(alumno.id, {
-                'presentes': 0,
-                'faltas': 0,
-                'retardos': 0,
-                'justificados': 0,
-                'total': 0
-            })
+            query = Asistencia.query.filter_by(alumno_id=alumno.id)
+            
+            if fecha_fin:
+                fecha_fin_obj = datetime.strptime(fecha_fin, '%Y-%m-%d').date() if isinstance(fecha_fin, str) else fecha_fin
+                query = query.filter(Asistencia.fecha >= fecha_inicio_obj, Asistencia.fecha <= fecha_fin_obj)
+            else:
+                query = query.filter_by(fecha=fecha_inicio_obj)
+            
+            presentes = query.filter_by(estado='P').count()
+            faltas = query.filter_by(estado='F').count()
+            retardos = query.filter_by(estado='R').count()
+            justificados = query.filter_by(estado='J').count()
+            total = presentes + faltas + retardos + justificados
             
             data.append([
                 str(idx),
                 alumno.nombre_completo,
-                str(stats['presentes']),
-                str(stats['faltas']),
-                str(stats['retardos']),
-                str(stats['justificados']),
-                str(stats['total'])
+                str(presentes),
+                str(faltas),
+                str(retardos),
+                str(justificados),
+                str(total)
             ])
         
         tabla = Table(data, colWidths=[0.5*inch, 3*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1*inch, 1*inch])
@@ -735,9 +618,12 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         elements.append(tabla)
         elements.append(Spacer(1, 30))
         
-        # Calcular totales
         total_alumnos = len(alumnos)
-        total_registros = sum(stats.get('total', 0) for stats in estadisticas.values())
+        total_registros = sum([
+            Asistencia.query.filter_by(alumno_id=a.id).filter(
+                Asistencia.fecha >= fecha_inicio_obj
+            ).count() for a in alumnos
+        ])
         
         stats_text = f"""
         <b>Resumen del Grupo:</b><br/>
@@ -1040,9 +926,10 @@ def actualizar_foto_perfil():
         return redirect(url_for('panel_alumnos'))
     
     try:
+        ruta_foto, es_s3 = guardar_archivo(foto)
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
-        # Usar la nueva función con transacción
-        ruta_foto, es_s3 = guardar_archivo_con_transaccion(foto, alumno)
+        alumno.foto_perfil = ruta_foto
+        db.session.commit()
         
         flash('¡Foto de perfil actualizada correctamente! 🎉', 'success')
         
@@ -1165,16 +1052,12 @@ def gestionar_alumnos():
     total_alumnos = UsuarioAlumno.query.count()
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     
-    # Crear objeto fecha para el template
-    fecha_hoy_obj = date.today()
-    
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
                          alumnos_activos=alumnos_activos,
                          filtro_actual=filtro,
-                         fecha_hoy=fecha_hoy_obj.isoformat(),
-                         fecha_hoy_obj=fecha_hoy_obj)  # <-- Añadir esto
+                         fecha_hoy=date.today().isoformat())
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 @require_profesor
@@ -1239,84 +1122,26 @@ def eliminar_alumno(id):
 
 @app.route('/admin/asistencia/tomar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per minute")
+@limiter.limit("10 per minute")  # Máx 10 registros de asistencia por minuto
 def tomar_asistencia():
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
-    contador_guardados = 0
-    errores = []
-    
-    # DEBUG: Log todos los campos recibidos
-    logger.info(f"📋 Campos recibidos en tomar_asistencia: {list(request.form.keys())}")
-    
     for key, value in request.form.items():
         if key.startswith('asistencia_'):
-            try:
-                # Extraer ID del alumno de forma segura
-                alumno_id_str = key.replace('asistencia_', '')
-                alumno_id = int(alumno_id_str)
-                
-                # Validar que el alumno exista
-                alumno = UsuarioAlumno.query.get(alumno_id)
-                if not alumno:
-                    logger.warning(f"⚠️ Alumno ID {alumno_id} no encontrado")
-                    errores.append(f"Alumno ID {alumno_id} no existe")
-                    continue
-                
-                # ✅ NORMALIZAR: Asegurar que siempre sea mayúscula
-                estado = value.upper().strip() if value else 'P'  # Default a 'P' si está vacío
-                
-                # ✅ VALIDAR: Solo permitir valores válidos
-                if estado not in ['P', 'F', 'R', 'J']:
-                    logger.warning(f"⚠️ Estado inválido: '{value}' para alumno {alumno_id} ({alumno.nombre_completo})")
-                    estado = 'P'  # Valor por defecto
-                
-                # Buscar registro existente
-                registro = Asistencia.query.filter_by(
-                    alumno_id=alumno_id, 
-                    fecha=fecha_obj
-                ).first()
-                
-                if registro:
-                    # Actualizar solo si cambió
-                    if registro.estado != estado:
-                        registro.estado = estado
-                        logger.info(f"📝 Actualizado: {alumno.nombre_completo} ({alumno_id}) = {estado}")
-                        contador_guardados += 1
-                else:
-                    # Crear nuevo registro
-                    nuevo = Asistencia(
-                        alumno_id=alumno_id, 
-                        fecha=fecha_obj, 
-                        estado=estado
-                    )
-                    db.session.add(nuevo)
-                    logger.info(f"➕ Creado: {alumno.nombre_completo} ({alumno_id}) = {estado}")
-                    contador_guardados += 1
-                    
-            except ValueError as e:
-                logger.error(f"❌ Error convirtiendo ID: {key} = {value}, error: {str(e)}")
-                errores.append(f"Error con campo {key}")
-                continue
-            except Exception as e:
-                logger.error(f"❌ Error procesando {key}: {str(e)}")
-                errores.append(f"Error procesando alumno {key}")
-                continue
+            alumno_id = int(key.split('_')[1])
+            estado = value
+            
+            registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
+            
+            if registro:
+                registro.estado = estado
+            else:
+                nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
+                db.session.add(nuevo)
     
-    try:
-        db.session.commit()
-        if errores:
-            logger.warning(f"⚠️ Asistencia guardada con {len(errores)} errores: {errores}")
-            flash(f'✅ Asistencia guardada ({contador_guardados} registros). Advertencias: {len(errores)} errores.', 'warning')
-        else:
-            logger.info(f"✅ Asistencia guardada exitosamente: {contador_guardados} registros para {fecha_str}")
-            flash(f'✅ Asistencia del día {fecha_str} guardada correctamente ({contador_guardados} alumnos).', 'success')
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"❌ Error al guardar asistencia: {str(e)}")
-        flash(f'❌ Error al guardar asistencia: {str(e)}', 'danger')
-    
+    db.session.commit()
+    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
     return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
 @app.route('/admin/reporte-asistencia/<grupo>')
@@ -1363,24 +1188,16 @@ def descargar_reporte(filename):
 @app.route('/admin/alumnos/entregas')
 @require_profesor
 def ver_entregas_alumnos():
-    # ✅ IMPLEMENTAR PAGINACIÓN
-    page = request.args.get('page', 1, type=int)
-    entregas_paginadas = EntregaAlumno.query.order_by(EntregaAlumno.fecha_entrega.desc()).paginate(
-        page=page, per_page=20, error_out=False
-    )
-    
-    # Obtener todas las entregas sin paginación para agrupar por alumno
-    # (esto podría mejorarse con una consulta separada si hay muchos datos)
-    all_entregas = EntregaAlumno.query.all()
+    entregas = EntregaAlumno.query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
     
     entregas_por_alumno = {}
-    for entrega in all_entregas:
+    for entrega in entregas:
         if entrega.nombre_alumno not in entregas_por_alumno:
             entregas_por_alumno[entrega.nombre_alumno] = []
         entregas_por_alumno[entrega.nombre_alumno].append(entrega)
     
     return render_template('admin/entregas_alumnos.html', 
-                         entregas=entregas_paginadas,
+                         entregas=entregas,
                          entregas_por_alumno=entregas_por_alumno)
 
 @app.route('/admin/alumnos/calificar/<int:id>', methods=['POST'])
@@ -1425,11 +1242,7 @@ def ver_reportes_asistencia():
         except:
             pass
     
-    # ✅ IMPLEMENTAR PAGINACIÓN
-    page = request.args.get('page', 1, type=int)
-    reportes_paginados = query.order_by(ReporteAsistencia.fecha_generacion.desc()).paginate(
-        page=page, per_page=20, error_out=False
-    )
+    reportes = query.order_by(ReporteAsistencia.fecha_generacion.desc()).all()
     
     grupos_disponibles = db.session.query(ReporteAsistencia.grupo).distinct().all()
     grupos_disponibles = [g[0] for g in grupos_disponibles]
@@ -1440,7 +1253,7 @@ def ver_reportes_asistencia():
     ).count()
     
     return render_template('admin/reportes_asistencia.html',
-                         reportes=reportes_paginados,
+                         reportes=reportes,
                          grupos_disponibles=grupos_disponibles,
                          filtro_grupo=filtro_grupo,
                          filtro_mes=filtro_mes,
@@ -1545,15 +1358,16 @@ def subir_tarea():
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         
         try:
+            ruta, es_s3 = guardar_archivo(archivo)
+            
             nueva_entrega = EntregaAlumno(
                 alumno_id=alumno.id,
                 nombre_alumno=alumno.nombre_completo,
                 grado_grupo=alumno.grado_grupo,
-                archivo_url=''  # Se llenará en guardar_archivo_con_transaccion
+                archivo_url=ruta
             )
-            
-            # Usar la función con transacción para evitar archivos huérfanos
-            ruta, es_s3 = guardar_archivo_con_transaccion(archivo, nueva_entrega)
+            db.session.add(nueva_entrega)
+            db.session.commit()
             
             flash('¡Tarea enviada con éxito! El profesor la revisará pronto.', 'success')
         except (FileValidationError, AppError) as e:
@@ -1892,14 +1706,10 @@ def gestionar_entregas():
     if filtro and filtro != 'Todos':
         query = query.filter(UsuarioAlumno.grado_grupo == filtro)
     
-    # ✅ IMPLEMENTAR PAGINACIÓN
-    page = request.args.get('page', 1, type=int)
-    entregas_paginadas = query.order_by(EntregaAlumno.fecha_entrega.desc()).paginate(
-        page=page, per_page=20, error_out=False
-    )
+    entregas = query.order_by(EntregaAlumno.fecha_entrega.desc()).all()
     
     return render_template('admin/entregas_alumnos.html', 
-                         entregas=entregas_paginadas, 
+                         entregas=entregas, 
                          filtro_actual=filtro)
 
 # --- GESTIÓN DE RECURSOS ---
@@ -1907,12 +1717,8 @@ def gestionar_entregas():
 @app.route('/admin/recursos')
 @require_profesor
 def gestionar_recursos():
-    # ✅ IMPLEMENTAR PAGINACIÓN
-    page = request.args.get('page', 1, type=int)
-    recursos_paginados = Recurso.query.order_by(Recurso.fecha.desc()).paginate(
-        page=page, per_page=20, error_out=False
-    )
-    return render_template('admin/recursos.html', recursos=recursos_paginados)
+    recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
+    return render_template('admin/recursos.html', recursos=recursos)
 
 @app.route('/admin/recursos/subir', methods=['POST'])
 @require_profesor
@@ -1923,28 +1729,25 @@ def subir_recurso():
 
     if archivo and titulo:
         try:
-            # Crear nueva entidad de recurso
-            nuevo = Recurso(
-                titulo=titulo, 
-                archivo_url='',  # Se llenará en guardar_archivo_con_transaccion
-                tipo_archivo='OTRO'  # Se actualizará después
-            )
+            ruta_archivo, es_s3 = guardar_archivo(archivo)
             
-            # Guardar archivo con transacción atómica
-            ruta_archivo, es_s3 = guardar_archivo_con_transaccion(archivo, nuevo)
-            
-            # Determinar tipo de archivo
             ext = archivo.filename.split('.')[-1].lower()
             if ext == 'pdf':
-                nuevo.tipo_archivo = 'PDF'
+                tipo = 'PDF'
             elif ext in ['doc', 'docx']:
-                nuevo.tipo_archivo = 'WORD'
+                tipo = 'WORD'
             else:
-                nuevo.tipo_archivo = 'OTRO'
-            
+                tipo = 'OTRO'
+
+            nuevo = Recurso(
+                titulo=titulo, 
+                archivo_url=ruta_archivo,
+                tipo_archivo=tipo
+            )
+            db.session.add(nuevo)
             db.session.commit()
-            flash('Recurso publicado correctamente.', 'success')
             
+            flash('Recurso publicado correctamente.', 'success')
         except (FileValidationError, AppError) as e:
             flash(f'Error: {str(e)}', 'danger')
             
@@ -2133,11 +1936,7 @@ def ver_boletas_historial():
     if filtro_periodo:
         query = query.filter(BoletaGenerada.periodo.contains(filtro_periodo))
     
-    # ✅ IMPLEMENTAR PAGINACIÓN
-    page = request.args.get('page', 1, type=int)
-    boletas_paginadas = query.order_by(BoletaGenerada.fecha_generacion.desc()).paginate(
-        page=page, per_page=20, error_out=False
-    )
+    boletas = query.order_by(BoletaGenerada.fecha_generacion.desc()).all()
     
     grupos_disponibles = db.session.query(UsuarioAlumno.grado_grupo).distinct().all()
     grupos_disponibles = sorted([g[0] for g in grupos_disponibles])
@@ -2148,7 +1947,7 @@ def ver_boletas_historial():
     ).count()
     
     return render_template('admin/boletas_historial.html',
-                         boletas=boletas_paginadas,
+                         boletas=boletas,
                          grupos_disponibles=grupos_disponibles,
                          filtro_grado=filtro_grado,
                          filtro_periodo=filtro_periodo,

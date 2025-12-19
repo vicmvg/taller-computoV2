@@ -1165,12 +1165,16 @@ def gestionar_alumnos():
     total_alumnos = UsuarioAlumno.query.count()
     alumnos_activos = UsuarioAlumno.query.filter_by(activo=True).count()
     
+    # Crear objeto fecha para el template
+    fecha_hoy_obj = date.today()
+    
     return render_template('admin/alumnos.html', 
                          alumnos=alumnos, 
                          total_alumnos=total_alumnos,
                          alumnos_activos=alumnos_activos,
                          filtro_actual=filtro,
-                         fecha_hoy=date.today().isoformat())
+                         fecha_hoy=fecha_hoy_obj.isoformat(),
+                         fecha_hoy_obj=fecha_hoy_obj)  # <-- Añadir esto
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 @require_profesor
@@ -1235,43 +1239,79 @@ def eliminar_alumno(id):
 
 @app.route('/admin/asistencia/tomar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 registros de asistencia por minuto
+@limiter.limit("10 per minute")
 def tomar_asistencia():
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
     contador_guardados = 0
+    errores = []
+    
+    # DEBUG: Log todos los campos recibidos
+    logger.info(f"📋 Campos recibidos en tomar_asistencia: {list(request.form.keys())}")
     
     for key, value in request.form.items():
         if key.startswith('asistencia_'):
-            alumno_id = int(key.split('_')[1])
-            
-            # ✅ NORMALIZAR: Asegurar que siempre sea mayúscula
-            estado = value.upper().strip()
-            
-            # ✅ VALIDAR: Solo permitir valores válidos
-            if estado not in ['P', 'F', 'R', 'J']:
-                logger.warning(f"⚠️ Estado inválido recibido: '{value}' para alumno {alumno_id}")
-                continue  # Saltar este registro
-            
-            registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
-            
-            if registro:
-                # Actualizar registro existente
-                registro.estado = estado
-                logger.info(f"📝 Actualizado: Alumno {alumno_id} = {estado}")
-            else:
-                # Crear nuevo registro
-                nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
-                db.session.add(nuevo)
-                logger.info(f"➕ Creado: Alumno {alumno_id} = {estado}")
-            
-            contador_guardados += 1
+            try:
+                # Extraer ID del alumno de forma segura
+                alumno_id_str = key.replace('asistencia_', '')
+                alumno_id = int(alumno_id_str)
+                
+                # Validar que el alumno exista
+                alumno = UsuarioAlumno.query.get(alumno_id)
+                if not alumno:
+                    logger.warning(f"⚠️ Alumno ID {alumno_id} no encontrado")
+                    errores.append(f"Alumno ID {alumno_id} no existe")
+                    continue
+                
+                # ✅ NORMALIZAR: Asegurar que siempre sea mayúscula
+                estado = value.upper().strip() if value else 'P'  # Default a 'P' si está vacío
+                
+                # ✅ VALIDAR: Solo permitir valores válidos
+                if estado not in ['P', 'F', 'R', 'J']:
+                    logger.warning(f"⚠️ Estado inválido: '{value}' para alumno {alumno_id} ({alumno.nombre_completo})")
+                    estado = 'P'  # Valor por defecto
+                
+                # Buscar registro existente
+                registro = Asistencia.query.filter_by(
+                    alumno_id=alumno_id, 
+                    fecha=fecha_obj
+                ).first()
+                
+                if registro:
+                    # Actualizar solo si cambió
+                    if registro.estado != estado:
+                        registro.estado = estado
+                        logger.info(f"📝 Actualizado: {alumno.nombre_completo} ({alumno_id}) = {estado}")
+                        contador_guardados += 1
+                else:
+                    # Crear nuevo registro
+                    nuevo = Asistencia(
+                        alumno_id=alumno_id, 
+                        fecha=fecha_obj, 
+                        estado=estado
+                    )
+                    db.session.add(nuevo)
+                    logger.info(f"➕ Creado: {alumno.nombre_completo} ({alumno_id}) = {estado}")
+                    contador_guardados += 1
+                    
+            except ValueError as e:
+                logger.error(f"❌ Error convirtiendo ID: {key} = {value}, error: {str(e)}")
+                errores.append(f"Error con campo {key}")
+                continue
+            except Exception as e:
+                logger.error(f"❌ Error procesando {key}: {str(e)}")
+                errores.append(f"Error procesando alumno {key}")
+                continue
     
     try:
         db.session.commit()
-        logger.info(f"✅ Asistencia guardada: {contador_guardados} registros para {fecha_str}")
-        flash(f'✅ Asistencia del día {fecha_str} guardada correctamente ({contador_guardados} alumnos).', 'success')
+        if errores:
+            logger.warning(f"⚠️ Asistencia guardada con {len(errores)} errores: {errores}")
+            flash(f'✅ Asistencia guardada ({contador_guardados} registros). Advertencias: {len(errores)} errores.', 'warning')
+        else:
+            logger.info(f"✅ Asistencia guardada exitosamente: {contador_guardados} registros para {fecha_str}")
+            flash(f'✅ Asistencia del día {fecha_str} guardada correctamente ({contador_guardados} alumnos).', 'success')
     except Exception as e:
         db.session.rollback()
         logger.error(f"❌ Error al guardar asistencia: {str(e)}")

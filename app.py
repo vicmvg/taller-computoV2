@@ -1,5 +1,3 @@
-[file name]: app.py
-[file content begin]
 import os
 import boto3
 import qrcode
@@ -2104,4 +2102,3 @@ with app.app_context():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-[file content end]

@@ -1,3 +1,5 @@
+[file name]: app.py
+[file content begin]
 import os
 import boto3
 import qrcode
@@ -337,12 +339,15 @@ class EntregaAlumno(db.Model):
     comentarios = db.Column(db.Text)
     fecha_entrega = db.Column(db.DateTime, default=datetime.utcnow)
 
+# ============================================
+# SOLUCIÓN 1: MODELO ASISTENCIA CORREGIDO
+# ============================================
 class Asistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
     fecha = db.Column(db.Date, default=datetime.utcnow)
     estado = db.Column(db.String(10))
-    alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True))
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True, cascade='all, delete-orphan'))
 
 class ReporteAsistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1030,7 +1035,6 @@ def obtener_mensajes():
             'es_mio': es_mio,
             'hora': m.fecha.strftime('%H:%M')
         })
-
     return {
         'mensajes': lista_mensajes,
         'activo': chat_activo,
@@ -1120,28 +1124,78 @@ def eliminar_alumno(id):
     flash(f'Alumno {nombre} eliminado del sistema.', 'warning')
     return redirect(url_for('gestionar_alumnos'))
 
+# ============================================
+# SOLUCIÓN 2: RUTA TOMAR ASISTENCIA CORREGIDA
+# ============================================
 @app.route('/admin/asistencia/tomar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 registros de asistencia por minuto
+@limiter.limit("10 per minute")
 def tomar_asistencia():
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
+    logger.info(f"📝 Tomando asistencia para fecha: {fecha_str}")
+    
+    # Contador para debug
+    registros_procesados = 0
+    registros_creados = 0
+    registros_actualizados = 0
+    
     for key, value in request.form.items():
         if key.startswith('asistencia_'):
-            alumno_id = int(key.split('_')[1])
-            estado = value
-            
-            registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
-            
-            if registro:
-                registro.estado = estado
-            else:
-                nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
-                db.session.add(nuevo)
+            try:
+                # Extraer el ID del alumno correctamente
+                alumno_id = int(key.split('_')[1])
+                estado = value
+                
+                logger.info(f"Procesando: alumno_id={alumno_id}, estado={estado}")
+                
+                # Verificar que el alumno existe
+                alumno = UsuarioAlumno.query.get(alumno_id)
+                if not alumno:
+                    logger.warning(f"⚠️ Alumno ID {alumno_id} no encontrado, saltando...")
+                    continue
+                
+                # Buscar registro existente
+                registro = Asistencia.query.filter_by(
+                    alumno_id=alumno_id, 
+                    fecha=fecha_obj
+                ).first()
+                
+                if registro:
+                    # Actualizar registro existente
+                    registro.estado = estado
+                    registros_actualizados += 1
+                    logger.info(f"✏️ Actualizado: {alumno.nombre_completo} -> {estado}")
+                else:
+                    # Crear nuevo registro
+                    nuevo = Asistencia(
+                        alumno_id=alumno_id, 
+                        fecha=fecha_obj, 
+                        estado=estado
+                    )
+                    db.session.add(nuevo)
+                    registros_creados += 1
+                    logger.info(f"➕ Creado: {alumno.nombre_completo} -> {estado}")
+                
+                registros_procesados += 1
+                
+            except ValueError as e:
+                logger.error(f"❌ Error parseando ID de '{key}': {str(e)}")
+                continue
+            except Exception as e:
+                logger.error(f"❌ Error procesando '{key}': {str(e)}")
+                continue
     
-    db.session.commit()
-    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
+    try:
+        db.session.commit()
+        logger.info(f"✅ Asistencia guardada: {registros_procesados} procesados, {registros_creados} nuevos, {registros_actualizados} actualizados")
+        flash(f'✅ Asistencia del día {fecha_str} guardada correctamente. ({registros_procesados} registros)', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"❌ Error al guardar asistencia: {str(e)}")
+        flash(f'❌ Error al guardar asistencia: {str(e)}', 'danger')
+    
     return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
 @app.route('/admin/reporte-asistencia/<grupo>')
@@ -1316,6 +1370,41 @@ def eliminar_reporte(reporte_id):
         flash(f'Error al eliminar reporte: {str(e)}', 'danger')
     
     return redirect(url_for('ver_reportes_asistencia'))
+
+# ============================================
+# SOLUCIÓN 3: RUTA TEMPORAL PARA DEBUGGING
+# ============================================
+@app.route('/admin/debug-asistencia', methods=['POST'])
+@require_profesor
+def debug_asistencia():
+    """Ruta temporal para debugging"""
+    fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
+    
+    debug_info = {
+        'fecha': fecha_str,
+        'campos_recibidos': []
+    }
+    
+    for key, value in request.form.items():
+        if key.startswith('asistencia_'):
+            try:
+                alumno_id = int(key.split('_')[1])
+                alumno = UsuarioAlumno.query.get(alumno_id)
+                
+                debug_info['campos_recibidos'].append({
+                    'key': key,
+                    'alumno_id': alumno_id,
+                    'alumno_nombre': alumno.nombre_completo if alumno else "NO ENCONTRADO",
+                    'estado': value
+                })
+            except ValueError:
+                debug_info['campos_recibidos'].append({
+                    'key': key,
+                    'error': 'ID no válido',
+                    'estado': value
+                })
+    
+    return jsonify(debug_info)
 
 # --- RUTAS DE ALUMNOS ---
 
@@ -2015,3 +2104,4 @@ with app.app_context():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+[file content end]

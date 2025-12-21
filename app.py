@@ -325,11 +325,11 @@ class UsuarioAlumno(db.Model):
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
     activo = db.Column(db.Boolean, default=True)
     foto_perfil = db.Column(db.String(300), nullable=True, default=None)
-    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True)
+    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True, cascade='all, delete-orphan')
 
 class EntregaAlumno(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
     archivo_url = db.Column(db.String(300))
@@ -394,7 +394,7 @@ class Plataforma(db.Model):
 
 class Mensaje(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'))
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
     contenido = db.Column(db.Text)
@@ -418,7 +418,7 @@ class CriterioBoleta(db.Model):
 
 class BoletaGenerada(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
     archivo_url = db.Column(db.String(500))
     nombre_archivo = db.Column(db.String(200))
     fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
@@ -426,7 +426,7 @@ class BoletaGenerada(db.Model):
     promedio = db.Column(db.Float)
     observaciones = db.Column(db.Text)
     generado_por = db.Column(db.String(100))
-    alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True))
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True, cascade='all, delete-orphan'))
 
 # --- FUNCIONES AUXILIARES REFACTORIZADAS ---
 

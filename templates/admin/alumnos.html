@@ -192,23 +192,40 @@
                                                 <td>{{ alumno.nombre_completo }}</td>
                                                 <td class="text-center">
                                                     <div class="btn-group" role="group">
-                                                        {% set asistencia_hoy = alumno.asistencias|selectattr('fecha', 'equalto', fecha_hoy_obj)|first if fecha_hoy_obj else None %}
+                                                        {% set asistencia_hoy = None %}
+                                                        {% for asist in alumno.asistencias %}
+                                                            {% if asist.fecha == fecha_hoy_obj %}
+                                                                {% set asistencia_hoy = asist %}
+                                                            {% endif %}
+                                                        {% endfor %}
                                                         
                                                         <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" 
                                                                id="p_{{ alumno.id }}" value="P" 
-                                                               {% if asistencia_hoy and asistencia_hoy.estado == 'P' %}checked
-                                                               {% elif not asistencia_hoy %}checked{% endif %}>
-                                                        <label class="btn btn-outline-success btn-sm" for="p_{{ alumno.id }}">P</label>
+                                                               {% if asistencia_hoy and asistencia_hoy.estado == 'P' %}checked{% endif %}>
+                                                        <label class="btn btn-outline-success btn-sm" for="p_{{ alumno.id }}">
+                                                            <i class="bi bi-check-circle"></i> P
+                                                        </label>
 
                                                         <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" 
                                                                id="f_{{ alumno.id }}" value="F"
                                                                {% if asistencia_hoy and asistencia_hoy.estado == 'F' %}checked{% endif %}>
-                                                        <label class="btn btn-outline-danger btn-sm" for="f_{{ alumno.id }}">F</label>
+                                                        <label class="btn btn-outline-danger btn-sm" for="f_{{ alumno.id }}">
+                                                            <i class="bi bi-x-circle"></i> F
+                                                        </label>
 
                                                         <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" 
                                                                id="r_{{ alumno.id }}" value="R"
                                                                {% if asistencia_hoy and asistencia_hoy.estado == 'R' %}checked{% endif %}>
-                                                        <label class="btn btn-outline-warning btn-sm" for="r_{{ alumno.id }}">R</label>
+                                                        <label class="btn btn-outline-warning btn-sm" for="r_{{ alumno.id }}">
+                                                            <i class="bi bi-clock"></i> R
+                                                        </label>
+
+                                                        <input type="radio" class="btn-check" name="asistencia_{{ alumno.id }}" 
+                                                               id="j_{{ alumno.id }}" value="J"
+                                                               {% if asistencia_hoy and asistencia_hoy.estado == 'J' %}checked{% endif %}>
+                                                        <label class="btn btn-outline-info btn-sm" for="j_{{ alumno.id }}">
+                                                            <i class="bi bi-check2-square"></i> J
+                                                        </label>
                                                     </div>
                                                 </td>
                                                 <td>

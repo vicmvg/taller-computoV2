@@ -1129,72 +1129,152 @@ def eliminar_alumno(id):
 @require_profesor
 @limiter.limit("10 per minute")
 def tomar_asistencia():
+    """
+    Toma asistencia de alumnos para una fecha específica.
+    
+    Formato esperado del formulario:
+    - fecha: YYYY-MM-DD
+    - asistencia_<alumno_id>: P|F|R|J
+    - grado_origen: grupo del filtro actual
+    """
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
-    fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
-    logger.info(f"📝 Tomando asistencia para fecha: {fecha_str}")
+    try:
+        fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+    except ValueError:
+        flash('❌ Fecha inválida', 'danger')
+        return redirect(url_for('gestionar_alumnos'))
     
-    # Contador para debug
+    logger.info(f"📝 === INICIANDO TOMA DE ASISTENCIA ===")
+    logger.info(f"📅 Fecha: {fecha_str}")
+    logger.info(f"📋 Datos del formulario: {dict(request.form)}")
+    
+    # Contadores
     registros_procesados = 0
     registros_creados = 0
     registros_actualizados = 0
+    errores = []
     
+    # Procesar cada campo del formulario
     for key, value in request.form.items():
-        if key.startswith('asistencia_'):
-            try:
-                # Extraer el ID del alumno correctamente
-                alumno_id = int(key.split('_')[1])
-                estado = value
-                
-                logger.info(f"Procesando: alumno_id={alumno_id}, estado={estado}")
-                
-                # Verificar que el alumno existe
-                alumno = UsuarioAlumno.query.get(alumno_id)
-                if not alumno:
-                    logger.warning(f"⚠️ Alumno ID {alumno_id} no encontrado, saltando...")
-                    continue
-                
-                # Buscar registro existente
-                registro = Asistencia.query.filter_by(
-                    alumno_id=alumno_id, 
-                    fecha=fecha_obj
-                ).first()
-                
-                if registro:
-                    # Actualizar registro existente
-                    registro.estado = estado
-                    registros_actualizados += 1
-                    logger.info(f"✏️ Actualizado: {alumno.nombre_completo} -> {estado}")
-                else:
-                    # Crear nuevo registro
-                    nuevo = Asistencia(
-                        alumno_id=alumno_id, 
-                        fecha=fecha_obj, 
-                        estado=estado
-                    )
-                    db.session.add(nuevo)
-                    registros_creados += 1
-                    logger.info(f"➕ Creado: {alumno.nombre_completo} -> {estado}")
-                
-                registros_procesados += 1
-                
-            except ValueError as e:
-                logger.error(f"❌ Error parseando ID de '{key}': {str(e)}")
+        # Solo procesar campos de asistencia
+        if not key.startswith('asistencia_'):
+            continue
+            
+        try:
+            # Extraer ID del alumno del nombre del campo
+            # Formato: asistencia_123 donde 123 es el ID
+            parts = key.split('_')
+            if len(parts) != 2:
+                logger.warning(f"⚠️ Formato de campo incorrecto: {key}")
                 continue
-            except Exception as e:
-                logger.error(f"❌ Error procesando '{key}': {str(e)}")
+                
+            alumno_id_str = parts[1]
+            
+            # Validar que sea un número
+            if not alumno_id_str.isdigit():
+                logger.warning(f"⚠️ ID no numérico: {alumno_id_str}")
                 continue
+                
+            alumno_id = int(alumno_id_str)
+            estado = value.strip().upper()
+            
+            # Validar estado
+            if estado not in ['P', 'F', 'R', 'J']:
+                logger.warning(f"⚠️ Estado inválido '{estado}' para alumno {alumno_id}")
+                continue
+            
+            logger.info(f"🔍 Procesando -> Alumno ID: {alumno_id}, Estado: {estado}")
+            
+            # Verificar que el alumno existe
+            alumno = UsuarioAlumno.query.get(alumno_id)
+            if not alumno:
+                msg = f"Alumno ID {alumno_id} no encontrado"
+                logger.error(f"❌ {msg}")
+                errores.append(msg)
+                continue
+            
+            logger.info(f"✅ Alumno encontrado: {alumno.nombre_completo}")
+            
+            # Buscar si ya existe un registro para este alumno en esta fecha
+            registro_existente = Asistencia.query.filter_by(
+                alumno_id=alumno_id,
+                fecha=fecha_obj
+            ).first()
+            
+            if registro_existente:
+                # Actualizar registro existente
+                logger.info(f"📝 Actualizando registro existente (anterior: {registro_existente.estado})")
+                registro_existente.estado = estado
+                registros_actualizados += 1
+            else:
+                # Crear nuevo registro
+                logger.info(f"➕ Creando nuevo registro")
+                nuevo_registro = Asistencia(
+                    alumno_id=alumno_id,
+                    fecha=fecha_obj,
+                    estado=estado
+                )
+                db.session.add(nuevo_registro)
+                registros_creados += 1
+            
+            registros_procesados += 1
+            logger.info(f"✅ Registro procesado correctamente para {alumno.nombre_completo}")
+            
+        except ValueError as e:
+            msg = f"Error al convertir ID '{key}': {str(e)}"
+            logger.error(f"❌ {msg}")
+            errores.append(msg)
+            continue
+            
+        except Exception as e:
+            msg = f"Error procesando '{key}': {str(e)}"
+            logger.error(f"❌ {msg}")
+            errores.append(msg)
+            continue
     
-    try:
-        db.session.commit()
-        logger.info(f"✅ Asistencia guardada: {registros_procesados} procesados, {registros_creados} nuevos, {registros_actualizados} actualizados")
-        flash(f'✅ Asistencia del día {fecha_str} guardada correctamente. ({registros_procesados} registros)', 'success')
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"❌ Error al guardar asistencia: {str(e)}")
-        flash(f'❌ Error al guardar asistencia: {str(e)}', 'danger')
+    # Intentar guardar en la base de datos
+    if registros_procesados > 0:
+        try:
+            db.session.commit()
+            
+            logger.info(f"""
+            ✅ === ASISTENCIA GUARDADA EXITOSAMENTE ===
+            📊 Total procesados: {registros_procesados}
+            ➕ Nuevos: {registros_creados}
+            ✏️ Actualizados: {registros_actualizados}
+            ❌ Errores: {len(errores)}
+            """)
+            
+            mensaje = f'✅ Asistencia guardada: {registros_procesados} registros'
+            if registros_creados > 0:
+                mensaje += f' ({registros_creados} nuevos'
+            if registros_actualizados > 0:
+                mensaje += f', {registros_actualizados} actualizados)'
+            
+            flash(mensaje, 'success')
+            
+            if errores:
+                flash(f'⚠️ Se encontraron {len(errores)} errores. Revisa los logs.', 'warning')
+                
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"""
+            ❌ === ERROR AL GUARDAR EN BASE DE DATOS ===
+            Error: {str(e)}
+            Tipo: {type(e).__name__}
+            """)
+            flash(f'❌ Error al guardar: {str(e)}', 'danger')
+    else:
+        logger.warning("⚠️ No se procesó ningún registro de asistencia")
+        flash('⚠️ No se encontraron registros de asistencia para procesar', 'warning')
     
-    return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
+    # Redirigir al mismo grupo si existe
+    grado_origen = request.form.get('grado_origen')
+    if grado_origen:
+        return redirect(url_for('gestionar_alumnos', grado=grado_origen))
+    else:
+        return redirect(url_for('gestionar_alumnos'))
 
 @app.route('/admin/reporte-asistencia/<grupo>')
 @require_profesor
@@ -1370,7 +1450,7 @@ def eliminar_reporte(reporte_id):
     return redirect(url_for('ver_reportes_asistencia'))
 
 # ============================================
-# SOLUCIÓN 3: RUTA TEMPORAL PARA DEBUGGING
+# SOLUCIÓN 4: RUTA TEMPORAL PARA DEBUGGING
 # ============================================
 @app.route('/admin/debug-asistencia', methods=['POST'])
 @require_profesor

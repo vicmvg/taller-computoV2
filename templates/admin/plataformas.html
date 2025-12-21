@@ -73,10 +73,10 @@
                 <table class="table table-hover mb-0 align-middle">
                     <thead class="bg-light">
                         <tr>
-                            <th class="ps-4">Icono</th>
-                            <th>Nombre</th>
+                            <th class="ps-4" style="width: 80px;">Icono</th>
+                            <th style="width: 200px;">Nombre</th>
                             <th>Enlace</th>
-                            <th class="text-end pe-4">Acción</th>
+                            <th class="text-end pe-4" style="width: 120px;">Acción</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -84,9 +84,17 @@
                         <tr>
                             <td class="ps-4"><i class="{{ p.icono }} fa-lg text-primary"></i></td>
                             <td class="fw-bold">{{ p.nombre }}</td>
-                            <td><a href="{{ p.url }}" target="_blank" class="small text-muted">{{ p.url }}</a></td>
+                            <td>
+                                <a href="{{ p.url }}" target="_blank" class="small text-muted text-decoration-none" 
+                                   style="display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
+                                   title="{{ p.url }}">
+                                    {{ p.url }}
+                                </a>
+                            </td>
                             <td class="text-end pe-4">
-                                <a href="{{ url_for('eliminar_plataforma', id=p.id) }}" class="btn btn-sm btn-outline-danger border-0">
+                                <a href="{{ url_for('eliminar_plataforma', id=p.id) }}" 
+                                   class="btn btn-sm btn-danger" 
+                                   onclick="return confirm('¿Seguro que deseas eliminar {{ p.nombre }}?')">
                                     <i class="fas fa-trash-alt"></i>
                                 </a>
                             </td>
@@ -94,6 +102,7 @@
                         {% else %}
                         <tr>
                             <td colspan="4" class="text-center py-5 text-muted">
+                                <i class="fas fa-inbox fa-3x mb-3 d-block"></i>
                                 No hay enlaces configurados.
                             </td>
                         </tr>
@@ -104,4 +113,16 @@
         </div>
     </div>
 </div>
+
+<style>
+/* Estilos adicionales para mejorar la visualización */
+.table td a:hover {
+    color: #0d6efd !important;
+}
+
+.btn-danger:hover {
+    transform: scale(1.05);
+    transition: transform 0.2s;
+}
+</style>
 {% endblock %}

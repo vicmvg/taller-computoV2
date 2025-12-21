@@ -7,5 +7,3 @@ qrcode
 pillow
 werkzeug
 reportlab
-python-magic==0.4.27
-flask-limiter==3.5.0

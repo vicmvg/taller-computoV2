@@ -20,10 +20,6 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from io import BytesIO
 
-# --- NUEVO: RATE LIMITING ---
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-
 # --- CONFIGURACIÓN DE LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,14 +27,6 @@ logger = logging.getLogger(__name__)
 # --- CONFIGURACIÓN INICIAL ---
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_desarrollo'  # Cambiar en producción
-
-# --- NUEVO: CONFIGURACIÓN DE RATE LIMITING ---
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://"  # Para producción, usa Redis o Memcached
-)
 
 # PALABRA MAESTRA PARA RECUPERAR CONTRASEÑA 
 TOKEN_MAESTRO = "treceT1gres"
@@ -266,7 +254,6 @@ def renovar_sesion():
     """Marca la sesión como permanente y la renueva en cada petición"""
     session.permanent = True
     session.modified = True
-    
 # --- CONFIGURACIÓN DE BASE DE DATOS ---
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///escuela.db')
 
@@ -325,11 +312,11 @@ class UsuarioAlumno(db.Model):
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
     activo = db.Column(db.Boolean, default=True)
     foto_perfil = db.Column(db.String(300), nullable=True, default=None)
-    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True)
 
 class EntregaAlumno(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
     archivo_url = db.Column(db.String(300))
@@ -337,15 +324,12 @@ class EntregaAlumno(db.Model):
     comentarios = db.Column(db.Text)
     fecha_entrega = db.Column(db.DateTime, default=datetime.utcnow)
 
-# ============================================
-# SOLUCIÓN 1: MODELO ASISTENCIA CORREGIDO
-# ============================================
 class Asistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
     fecha = db.Column(db.Date, default=datetime.utcnow)
     estado = db.Column(db.String(10))
-    alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True, cascade='all, delete-orphan'))
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('asistencias', lazy=True))
 
 class ReporteAsistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -394,7 +378,7 @@ class Plataforma(db.Model):
 
 class Mensaje(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'))
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
     contenido = db.Column(db.Text)
@@ -418,7 +402,7 @@ class CriterioBoleta(db.Model):
 
 class BoletaGenerada(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
     archivo_url = db.Column(db.String(500))
     nombre_archivo = db.Column(db.String(200))
     fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
@@ -426,7 +410,7 @@ class BoletaGenerada(db.Model):
     promedio = db.Column(db.Float)
     observaciones = db.Column(db.Text)
     generado_por = db.Column(db.String(100))
-    alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True, cascade='all, delete-orphan'))
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True))
 
 # --- FUNCIONES AUXILIARES REFACTORIZADAS ---
 
@@ -916,7 +900,6 @@ def logout_alumnos():
 
 @app.route('/alumnos/perfil/foto', methods=['POST'])
 @require_alumno
-@limiter.limit("5 per hour")  # Máx 5 cambios de foto por hora
 def actualizar_foto_perfil():
     if 'foto' not in request.files:
         flash('No se seleccionó ninguna foto', 'danger')
@@ -983,7 +966,6 @@ def toggle_chat():
 
 @app.route('/api/chat/enviar', methods=['POST'])
 @require_alumno
-@limiter.limit("30 per minute")  # Máx 30 mensajes por minuto por alumno
 def enviar_mensaje():
     config = Configuracion.query.get('chat_activo')
     if config and config.valor == 'False':
@@ -992,9 +974,6 @@ def enviar_mensaje():
     contenido = request.form.get('mensaje')
     if not contenido or contenido.strip() == '':
         return {'status': 'error', 'msg': 'Mensaje vacío'}, 400
-    
-    if len(contenido.strip()) > 500:
-        return {'status': 'error', 'msg': 'Mensaje demasiado largo (máx 500 caracteres)'}, 400
 
     nuevo = Mensaje(
         alumno_id=session['alumno_id'],
@@ -1011,15 +990,7 @@ def enviar_mensaje():
 @require_alumno
 def obtener_mensajes():
     mi_grupo = session['alumno_grado']
-    
-    # ✅ OPTIMIZACIÓN CRÍTICA: Obtener solo los últimos 50 mensajes
-    mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo)\
-        .order_by(Mensaje.fecha.desc())\
-        .limit(50)\
-        .all()
-    
-    # Revertir para tener orden cronológico
-    mensajes.reverse()
+    mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo).order_by(Mensaje.fecha.asc()).all()
     
     config = Configuracion.query.get('chat_activo')
     chat_activo = True if not config or config.valor == 'True' else False
@@ -1033,10 +1004,10 @@ def obtener_mensajes():
             'es_mio': es_mio,
             'hora': m.fecha.strftime('%H:%M')
         })
+
     return {
         'mensajes': lista_mensajes,
-        'activo': chat_activo,
-        'total_mensajes': len(lista_mensajes)
+        'activo': chat_activo
     }
 
 # --- RUTAS DE GESTIÓN DE ALUMNOS Y ASISTENCIA ---
@@ -1063,7 +1034,6 @@ def gestionar_alumnos():
 
 @app.route('/admin/alumnos/agregar', methods=['POST'])
 @require_profesor
-@limiter.limit("20 per hour")  # Máx 20 alumnos por hora
 def agregar_alumno():
     username = request.form['username']
     nombre_completo = request.form['nombre_completo']
@@ -1093,7 +1063,6 @@ def agregar_alumno():
 
 @app.route('/admin/alumnos/editar/<int:id>', methods=['POST'])
 @require_profesor
-@limiter.limit("30 per hour")  # Máx 30 ediciones por hora
 def editar_alumno(id):
     alumno = UsuarioAlumno.query.get_or_404(id)
     
@@ -1112,7 +1081,6 @@ def editar_alumno(id):
 
 @app.route('/admin/alumnos/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 eliminaciones por hora
 def eliminar_alumno(id):
     alumno = UsuarioAlumno.query.get_or_404(id)
     nombre = alumno.nombre_completo
@@ -1122,163 +1090,31 @@ def eliminar_alumno(id):
     flash(f'Alumno {nombre} eliminado del sistema.', 'warning')
     return redirect(url_for('gestionar_alumnos'))
 
-# ============================================
-# SOLUCIÓN 2: RUTA TOMAR ASISTENCIA CORREGIDA
-# ============================================
 @app.route('/admin/asistencia/tomar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per minute")
 def tomar_asistencia():
-    """
-    Toma asistencia de alumnos para una fecha específica.
-    
-    Formato esperado del formulario:
-    - fecha: YYYY-MM-DD
-    - asistencia_<alumno_id>: P|F|R|J
-    - grado_origen: grupo del filtro actual
-    """
     fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
+    fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
     
-    try:
-        fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
-    except ValueError:
-        flash('❌ Fecha inválida', 'danger')
-        return redirect(url_for('gestionar_alumnos'))
-    
-    logger.info(f"📝 === INICIANDO TOMA DE ASISTENCIA ===")
-    logger.info(f"📅 Fecha: {fecha_str}")
-    logger.info(f"📋 Datos del formulario: {dict(request.form)}")
-    
-    # Contadores
-    registros_procesados = 0
-    registros_creados = 0
-    registros_actualizados = 0
-    errores = []
-    
-    # Procesar cada campo del formulario
     for key, value in request.form.items():
-        # Solo procesar campos de asistencia
-        if not key.startswith('asistencia_'):
-            continue
+        if key.startswith('asistencia_'):
+            alumno_id = int(key.split('_')[1])
+            estado = value
             
-        try:
-            # Extraer ID del alumno del nombre del campo
-            # Formato: asistencia_123 donde 123 es el ID
-            parts = key.split('_')
-            if len(parts) != 2:
-                logger.warning(f"⚠️ Formato de campo incorrecto: {key}")
-                continue
-                
-            alumno_id_str = parts[1]
+            registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
             
-            # Validar que sea un número
-            if not alumno_id_str.isdigit():
-                logger.warning(f"⚠️ ID no numérico: {alumno_id_str}")
-                continue
-                
-            alumno_id = int(alumno_id_str)
-            estado = value.strip().upper()
-            
-            # Validar estado
-            if estado not in ['P', 'F', 'R', 'J']:
-                logger.warning(f"⚠️ Estado inválido '{estado}' para alumno {alumno_id}")
-                continue
-            
-            logger.info(f"🔍 Procesando -> Alumno ID: {alumno_id}, Estado: {estado}")
-            
-            # Verificar que el alumno existe
-            alumno = UsuarioAlumno.query.get(alumno_id)
-            if not alumno:
-                msg = f"Alumno ID {alumno_id} no encontrado"
-                logger.error(f"❌ {msg}")
-                errores.append(msg)
-                continue
-            
-            logger.info(f"✅ Alumno encontrado: {alumno.nombre_completo}")
-            
-            # Buscar si ya existe un registro para este alumno en esta fecha
-            registro_existente = Asistencia.query.filter_by(
-                alumno_id=alumno_id,
-                fecha=fecha_obj
-            ).first()
-            
-            if registro_existente:
-                # Actualizar registro existente
-                logger.info(f"📝 Actualizando registro existente (anterior: {registro_existente.estado})")
-                registro_existente.estado = estado
-                registros_actualizados += 1
+            if registro:
+                registro.estado = estado
             else:
-                # Crear nuevo registro
-                logger.info(f"➕ Creando nuevo registro")
-                nuevo_registro = Asistencia(
-                    alumno_id=alumno_id,
-                    fecha=fecha_obj,
-                    estado=estado
-                )
-                db.session.add(nuevo_registro)
-                registros_creados += 1
-            
-            registros_procesados += 1
-            logger.info(f"✅ Registro procesado correctamente para {alumno.nombre_completo}")
-            
-        except ValueError as e:
-            msg = f"Error al convertir ID '{key}': {str(e)}"
-            logger.error(f"❌ {msg}")
-            errores.append(msg)
-            continue
-            
-        except Exception as e:
-            msg = f"Error procesando '{key}': {str(e)}"
-            logger.error(f"❌ {msg}")
-            errores.append(msg)
-            continue
+                nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
+                db.session.add(nuevo)
     
-    # Intentar guardar en la base de datos
-    if registros_procesados > 0:
-        try:
-            db.session.commit()
-            
-            logger.info(f"""
-            ✅ === ASISTENCIA GUARDADA EXITOSAMENTE ===
-            📊 Total procesados: {registros_procesados}
-            ➕ Nuevos: {registros_creados}
-            ✏️ Actualizados: {registros_actualizados}
-            ❌ Errores: {len(errores)}
-            """)
-            
-            mensaje = f'✅ Asistencia guardada: {registros_procesados} registros'
-            if registros_creados > 0:
-                mensaje += f' ({registros_creados} nuevos'
-            if registros_actualizados > 0:
-                mensaje += f', {registros_actualizados} actualizados)'
-            
-            flash(mensaje, 'success')
-            
-            if errores:
-                flash(f'⚠️ Se encontraron {len(errores)} errores. Revisa los logs.', 'warning')
-                
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"""
-            ❌ === ERROR AL GUARDAR EN BASE DE DATOS ===
-            Error: {str(e)}
-            Tipo: {type(e).__name__}
-            """)
-            flash(f'❌ Error al guardar: {str(e)}', 'danger')
-    else:
-        logger.warning("⚠️ No se procesó ningún registro de asistencia")
-        flash('⚠️ No se encontraron registros de asistencia para procesar', 'warning')
-    
-    # Redirigir al mismo grupo si existe
-    grado_origen = request.form.get('grado_origen')
-    if grado_origen:
-        return redirect(url_for('gestionar_alumnos', grado=grado_origen))
-    else:
-        return redirect(url_for('gestionar_alumnos'))
+    db.session.commit()
+    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
+    return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
 @app.route('/admin/reporte-asistencia/<grupo>')
 @require_profesor
-@limiter.limit("5 per minute")  # Máx 5 reportes por minuto
 def generar_reporte_asistencia(grupo):
     fecha_inicio = request.args.get('fecha_inicio', date.today().isoformat())
     fecha_fin = request.args.get('fecha_fin', None)
@@ -1334,7 +1170,6 @@ def ver_entregas_alumnos():
 
 @app.route('/admin/alumnos/calificar/<int:id>', methods=['POST'])
 @require_profesor
-@limiter.limit("30 per minute")  # Máx 30 calificaciones por minuto
 def calificar_entrega(id):
     entrega = EntregaAlumno.query.get_or_404(id)
     entrega.estrellas = int(request.form['estrellas'])
@@ -1426,7 +1261,6 @@ def descargar_reporte_guardado(reporte_id):
 
 @app.route('/admin/eliminar-reporte/<int:reporte_id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_reporte(reporte_id):
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
     
@@ -1448,41 +1282,6 @@ def eliminar_reporte(reporte_id):
         flash(f'Error al eliminar reporte: {str(e)}', 'danger')
     
     return redirect(url_for('ver_reportes_asistencia'))
-
-# ============================================
-# SOLUCIÓN 4: RUTA TEMPORAL PARA DEBUGGING
-# ============================================
-@app.route('/admin/debug-asistencia', methods=['POST'])
-@require_profesor
-def debug_asistencia():
-    """Ruta temporal para debugging"""
-    fecha_str = request.form.get('fecha', datetime.utcnow().strftime('%Y-%m-%d'))
-    
-    debug_info = {
-        'fecha': fecha_str,
-        'campos_recibidos': []
-    }
-    
-    for key, value in request.form.items():
-        if key.startswith('asistencia_'):
-            try:
-                alumno_id = int(key.split('_')[1])
-                alumno = UsuarioAlumno.query.get(alumno_id)
-                
-                debug_info['campos_recibidos'].append({
-                    'key': key,
-                    'alumno_id': alumno_id,
-                    'alumno_nombre': alumno.nombre_completo if alumno else "NO ENCONTRADO",
-                    'estado': value
-                })
-            except ValueError:
-                debug_info['campos_recibidos'].append({
-                    'key': key,
-                    'error': 'ID no válido',
-                    'estado': value
-                })
-    
-    return jsonify(debug_info)
 
 # --- RUTAS DE ALUMNOS ---
 
@@ -1510,7 +1309,6 @@ def panel_alumnos():
 
 @app.route('/alumnos/subir', methods=['POST'])
 @require_alumno
-@limiter.limit("10 per hour")  # Máx 10 tareas por hora por alumno
 def subir_tarea():
     if 'archivo' not in request.files:
         flash('No se subió archivo', 'danger')
@@ -1552,7 +1350,6 @@ def inventario():
 
 @app.route('/admin/inventario/agregar', methods=['POST'])
 @require_profesor
-@limiter.limit("20 per hour")  # Máx 20 equipos por hora
 def agregar_equipo():
     nuevo_equipo = Equipo(
         tipo=request.form['tipo'],
@@ -1569,7 +1366,6 @@ def agregar_equipo():
 
 @app.route('/admin/inventario/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_equipo(id):
     equipo = Equipo.query.get_or_404(id)
     db.session.delete(equipo)
@@ -1579,7 +1375,6 @@ def eliminar_equipo(id):
 
 @app.route('/admin/generar_qr_img/<int:id>')
 @require_profesor
-@limiter.limit("30 per minute")  # Máx 30 QR por minuto
 def generar_qr_img(id):
     equipo = Equipo.query.get_or_404(id)
     info_qr = f"PROPIEDAD ESCUELA MARIANO ESCOBEDO\nID: {equipo.id}\nTipo: {equipo.tipo}\nMarca: {equipo.marca}\nModelo: {equipo.modelo}"
@@ -1608,7 +1403,6 @@ def mantenimiento():
 
 @app.route('/admin/mantenimiento/reportar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 reportes por minuto
 def reportar_falla():
     equipo_id = request.form['equipo_id']
     descripcion = request.form['descripcion']
@@ -1625,7 +1419,6 @@ def reportar_falla():
 
 @app.route('/admin/mantenimiento/solucionar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 soluciones por minuto
 def solucionar_falla():
     reporte_id = request.form['reporte_id']
     solucion = request.form['solucion']
@@ -1649,7 +1442,6 @@ def gestionar_anuncios():
 
 @app.route('/admin/anuncios/publicar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 anuncios por hora
 def publicar_anuncio():
     titulo = request.form['titulo']
     contenido = request.form['contenido']
@@ -1663,7 +1455,6 @@ def publicar_anuncio():
 
 @app.route('/admin/anuncios/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("20 per minute")  # Máx 20 eliminaciones por minuto
 def eliminar_anuncio(id):
     anuncio = Anuncio.query.get_or_404(id)
     db.session.delete(anuncio)
@@ -1681,7 +1472,6 @@ def gestionar_cuestionarios():
 
 @app.route('/admin/cuestionarios/publicar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 cuestionarios por hora
 def publicar_cuestionario():
     grado = request.form['grado']
     grupo = request.form['grupo']
@@ -1699,7 +1489,6 @@ def publicar_cuestionario():
 
 @app.route('/admin/cuestionarios/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("20 per minute")  # Máx 20 eliminaciones por minuto
 def eliminar_cuestionario(id):
     item = Cuestionario.query.get_or_404(id)
     db.session.delete(item)
@@ -1717,7 +1506,6 @@ def gestionar_banco():
 
 @app.route('/admin/banco/agregar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 añadidos al banco por hora
 def agregar_al_banco():
     nuevo = BancoCuestionario(
         titulo=request.form['titulo'],
@@ -1730,7 +1518,6 @@ def agregar_al_banco():
 
 @app.route('/admin/banco/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_del_banco(id):
     item = BancoCuestionario.query.get_or_404(id)
     db.session.delete(item)
@@ -1740,7 +1527,6 @@ def eliminar_del_banco(id):
 
 @app.route('/admin/banco/asignar', methods=['POST'])
 @require_profesor
-@limiter.limit("20 per hour")  # Máx 20 asignaciones por hora
 def asignar_desde_banco():
     plantilla_id = request.form['plantilla_id']
     grado = request.form['grado']
@@ -1807,7 +1593,6 @@ def gestionar_horarios():
 
 @app.route('/admin/horarios/agregar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 horarios por hora
 def agregar_horario():
     nuevo = Horario(
         dia=request.form['dia'],
@@ -1821,7 +1606,6 @@ def agregar_horario():
 
 @app.route('/admin/horarios/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_horario(id):
     horario = Horario.query.get_or_404(id)
     db.session.delete(horario)
@@ -1839,7 +1623,6 @@ def gestionar_plataformas():
 
 @app.route('/admin/plataformas/agregar', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 plataformas por hora
 def agregar_plataforma():
     nueva = Plataforma(
         nombre=request.form['nombre'],
@@ -1853,7 +1636,6 @@ def agregar_plataforma():
 
 @app.route('/admin/plataformas/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_plataforma(id):
     p = Plataforma.query.get_or_404(id)
     db.session.delete(p)
@@ -1889,7 +1671,6 @@ def gestionar_recursos():
 
 @app.route('/admin/recursos/subir', methods=['POST'])
 @require_profesor
-@limiter.limit("10 per hour")  # Máx 10 recursos por hora
 def subir_recurso():
     archivo = request.files.get('archivo')
     titulo = request.form.get('titulo')
@@ -1922,7 +1703,6 @@ def subir_recurso():
 
 @app.route('/admin/recursos/eliminar/<int:id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_recurso(id):
     recurso = Recurso.query.get_or_404(id)
     db.session.delete(recurso)
@@ -1937,7 +1717,6 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/ver-archivo/<path:archivo_path>')
-@limiter.limit("30 per minute")  # Máx 30 descargas por minuto
 def ver_archivo(archivo_path):
     try:
         if archivo_path.startswith('uploads/'):
@@ -2002,7 +1781,6 @@ def configurar_boletas():
 
 @app.route('/admin/boletas/borrar-criterio/<int:id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def borrar_criterio(id):
     c = CriterioBoleta.query.get_or_404(id)
     db.session.delete(c)
@@ -2011,7 +1789,6 @@ def borrar_criterio(id):
 
 @app.route('/admin/boletas/generar', methods=['GET', 'POST'])
 @require_profesor
-@limiter.limit("5 per minute")  # Máx 5 boletas por minuto
 def generar_boleta():
     alumno = None
     criterios = []
@@ -2152,7 +1929,6 @@ def descargar_boleta_guardada(boleta_id):
 
 @app.route('/admin/boletas/eliminar/<int:boleta_id>')
 @require_profesor
-@limiter.limit("10 per minute")  # Máx 10 eliminaciones por minuto
 def eliminar_boleta_guardada(boleta_id):
     boleta = BoletaGenerada.query.get_or_404(boleta_id)
     

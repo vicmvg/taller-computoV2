@@ -304,12 +304,31 @@ if DATABASE_URL.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,
-    'pool_recycle': 300,
-    'pool_size': 10,
-    'max_overflow': 20
-}
+
+# Configuración optimizada para Render
+if DATABASE_URL.startswith("postgresql://"):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 280,
+        'pool_size': 3,
+        'max_overflow': 5,
+        'pool_timeout': 30,
+        'connect_args': {
+            'connect_timeout': 10,
+            'keepalives': 1,
+            'keepalives_idle': 30,
+            'keepalives_interval': 10,
+            'keepalives_count': 5,
+        }
+    }
+else:
+    # Para desarrollo local con SQLite
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+        'pool_size': 10,
+        'max_overflow': 20
+    }
 
 db = SQLAlchemy(app)
 
@@ -480,7 +499,8 @@ class Pago(db.Model):
     fecha_vencimiento = db.Column(db.Date, nullable=True)
     grado_grupo = db.Column(db.String(20))
     creado_por = db.Column(db.String(100))
-    recibos = db.relationship('ReciboPago', backref='pago', lazy=True)
+    # CORRECCIÓN 1: Agregado cascade='all, delete-orphan'
+    recibos = db.relationship('ReciboPago', backref='pago', lazy=True, cascade='all, delete-orphan')
 
 class ReciboPago(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -778,14 +798,14 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         # Query optimizado para evitar N+1
         from sqlalchemy import func, case
         
-        # Obtener alumnos con sus estadísticas en una sola query
+        # CORRECCIÓN 2: Cambiar case([(condición, valor)]) por case((condición, valor))
         alumnos_con_stats = db.session.query(
             UsuarioAlumno.id,
             UsuarioAlumno.nombre_completo,
-            func.count(case([(Asistencia.estado == 'P', 1)])).label('presentes'),
-            func.count(case([(Asistencia.estado == 'F', 1)])).label('faltas'),
-            func.count(case([(Asistencia.estado == 'R', 1)])).label('retardos'),
-            func.count(case([(Asistencia.estado == 'J', 1)])).label('justificados'),
+            func.count(case((Asistencia.estado == 'P', 1))).label('presentes'),
+            func.count(case((Asistencia.estado == 'F', 1))).label('faltas'),
+            func.count(case((Asistencia.estado == 'R', 1))).label('retardos'),
+            func.count(case((Asistencia.estado == 'J', 1))).label('justificados'),
             func.count(Asistencia.id).label('total')
         ).outerjoin(
             Asistencia,
@@ -2483,17 +2503,28 @@ def eliminar_pago(pago_id):
     pago = Pago.query.get_or_404(pago_id)
     
     try:
-        for recibo in pago.recibos:
+        # Primero eliminar archivos de S3
+        recibos_a_eliminar = list(pago.recibos)  # Crear lista para evitar problemas con la relación
+        
+        for recibo in recibos_a_eliminar:
             if recibo.archivo_url and s3_manager.is_configured:
                 try:
                     s3_manager.delete_file(recibo.archivo_url)
+                    log_info(f"Archivo eliminado: {recibo.archivo_url}")
                 except S3UploadError as e:
                     log_warning(f"No se pudo eliminar recibo de S3: {e}")
+            
+            # Eliminar el recibo ANTES de eliminar el pago
+            db.session.delete(recibo)
         
+        # Hacer flush para aplicar las eliminaciones de recibos
+        db.session.flush()
+        
+        # Ahora eliminar el pago
         db.session.delete(pago)
         db.session.commit()
         
-        flash('Pago eliminado correctamente', 'success')
+        flash('Pago y recibos eliminados correctamente', 'success')
     except Exception as e:
         db.session.rollback()
         log_error(f"Error al eliminar pago: {str(e)}")

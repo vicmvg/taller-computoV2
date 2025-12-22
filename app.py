@@ -384,6 +384,21 @@ class Mensaje(db.Model):
     contenido = db.Column(db.Text)
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
+# --- AGREGAR ESTE MODELO DESPUÉS DE LA CLASE Mensaje ---
+class MensajeFlotante(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    grado_grupo = db.Column(db.String(20), nullable=False)
+    contenido = db.Column(db.Text, nullable=False)
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    activo = db.Column(db.Boolean, default=True)
+    creado_por = db.Column(db.String(100))
+
+class MensajeLeido(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    mensaje_id = db.Column(db.Integer, db.ForeignKey('mensaje_flotante.id'))
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
+    fecha_lectura = db.Column(db.DateTime, default=datetime.utcnow)
+
 class Configuracion(db.Model):
     clave = db.Column(db.String(50), primary_key=True)
     valor = db.Column(db.String(200))
@@ -1949,6 +1964,99 @@ def eliminar_boleta_guardada(boleta_id):
         flash(f'Error al eliminar boleta: {str(e)}', 'danger')
     
     return redirect(url_for('ver_boletas_historial'))
+
+# --- AGREGAR ESTAS RUTAS AL FINAL DEL ARCHIVO, ANTES DEL if __name__ == '__main__': ---
+
+@app.route('/admin/mensajes-flotantes')
+@require_profesor
+def gestionar_mensajes_flotantes():
+    mensajes = MensajeFlotante.query.filter_by(activo=True).order_by(MensajeFlotante.fecha_creacion.desc()).all()
+    
+    # Obtener estadísticas de lectura para cada mensaje
+    mensajes_con_stats = []
+    for msg in mensajes:
+        total_alumnos = UsuarioAlumno.query.filter_by(grado_grupo=msg.grado_grupo, activo=True).count()
+        leidos = MensajeLeido.query.filter_by(mensaje_id=msg.id).count()
+        mensajes_con_stats.append({
+            'mensaje': msg,
+            'total_alumnos': total_alumnos,
+            'leidos': leidos
+        })
+    
+    return render_template('admin/mensajes_flotantes.html', mensajes_con_stats=mensajes_con_stats)
+
+@app.route('/admin/mensajes-flotantes/crear', methods=['POST'])
+@require_profesor
+def crear_mensaje_flotante():
+    grado = request.form.get('grado')
+    grupo = request.form.get('grupo')
+    contenido = request.form.get('contenido')
+    
+    if not contenido or not grado or not grupo:
+        flash('Debes completar todos los campos', 'danger')
+        return redirect(url_for('gestionar_mensajes_flotantes'))
+    
+    grado_grupo = f"{grado}{grupo}"
+    
+    nuevo_mensaje = MensajeFlotante(
+        grado_grupo=grado_grupo,
+        contenido=contenido,
+        creado_por=session.get('user', 'Sistema')
+    )
+    
+    db.session.add(nuevo_mensaje)
+    db.session.commit()
+    
+    flash(f'¡Mensaje enviado al grupo {grado_grupo}!', 'success')
+    return redirect(url_for('gestionar_mensajes_flotantes'))
+
+@app.route('/admin/mensajes-flotantes/desactivar/<int:id>')
+@require_profesor
+def desactivar_mensaje_flotante(id):
+    mensaje = MensajeFlotante.query.get_or_404(id)
+    mensaje.activo = False
+    db.session.commit()
+    
+    flash('Mensaje desactivado correctamente', 'success')
+    return redirect(url_for('gestionar_mensajes_flotantes'))
+
+@app.route('/api/mensajes-flotantes/obtener')
+@require_alumno
+def obtener_mensajes_flotantes():
+    alumno_id = session.get('alumno_id')
+    grado_grupo = session.get('alumno_grado')
+    
+    # Obtener mensajes activos para este grupo que el alumno NO ha leído
+    mensajes_leidos = db.session.query(MensajeLeido.mensaje_id).filter_by(alumno_id=alumno_id).all()
+    ids_leidos = [m[0] for m in mensajes_leidos]
+    
+    mensajes = MensajeFlotante.query.filter_by(
+        grado_grupo=grado_grupo,
+        activo=True
+    ).filter(
+        MensajeFlotante.id.notin_(ids_leidos) if ids_leidos else True
+    ).order_by(MensajeFlotante.fecha_creacion.desc()).all()
+    
+    return jsonify([{
+        'id': m.id,
+        'contenido': m.contenido,
+        'fecha': m.fecha_creacion.strftime('%d/%m/%Y %H:%M')
+    } for m in mensajes])
+
+@app.route('/api/mensajes-flotantes/marcar-leido/<int:mensaje_id>', methods=['POST'])
+@require_alumno
+def marcar_mensaje_leido(mensaje_id):
+    alumno_id = session.get('alumno_id')
+    
+    # Verificar si ya fue marcado como leído
+    existe = MensajeLeido.query.filter_by(mensaje_id=mensaje_id, alumno_id=alumno_id).first()
+    
+    if not existe:
+        nuevo_leido = MensajeLeido(mensaje_id=mensaje_id, alumno_id=alumno_id)
+        db.session.add(nuevo_leido)
+        db.session.commit()
+    
+    return jsonify({'status': 'ok'})
 
 # --- INICIALIZADOR ---
 

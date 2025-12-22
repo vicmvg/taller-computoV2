@@ -72,9 +72,115 @@
             transform: translateY(-2px);
             transition: transform 0.2s ease;
         }
+        
+        /* Estilos para mensajes flotantes */
+        .mensaje-flotante {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+            border-left: 5px solid #ff6b6b;
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 15px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+            animation: slideInRight 0.5s ease-out;
+            position: relative;
+            max-width: 400px;
+        }
+
+        .mensaje-flotante-contenido {
+            color: #2c3e50;
+            font-weight: 600;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            padding-right: 30px;
+            margin: 0;
+        }
+
+        .mensaje-flotante-fecha {
+            color: #555;
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+            display: block;
+            opacity: 0.8;
+        }
+
+        .mensaje-flotante-cerrar {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+            color: #ff6b6b;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .mensaje-flotante-cerrar:hover {
+            background: #ff6b6b;
+            color: white;
+            transform: rotate(90deg);
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+        }
+
+        .mensaje-saliendo {
+            animation: slideOutRight 0.3s ease-out forwards;
+        }
+
+        /* Responsive para mensajes flotantes */
+        @media (max-width: 768px) {
+            #mensajes-flotantes-container {
+                top: 70px;
+                right: 10px;
+                left: 10px;
+                width: auto;
+                max-width: none;
+            }
+            
+            .mensaje-flotante {
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Contenedor de mensajes flotantes -->
+    <div id="mensajes-flotantes-container" style="
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 9999;
+        max-width: 400px;
+        width: calc(100% - 40px);
+    "></div>
+
     <div class="container-fluid">
         <div class="row">
             <!-- Sidebar -->
@@ -665,6 +771,74 @@
         // Iniciar el ciclo de actualización (Cada 3 segundos)
         setInterval(actualizarChat, 3000);
         actualizarChat(); // Primera carga
+    </script>
+
+    <!-- Scripts para mensajes flotantes -->
+    <script>
+        // Cargar mensajes flotantes al iniciar
+        document.addEventListener('DOMContentLoaded', function() {
+            cargarMensajesFlotantes();
+        });
+
+        function cargarMensajesFlotantes() {
+            fetch('/api/mensajes-flotantes/obtener')
+                .then(response => response.json())
+                .then(mensajes => {
+                    const container = document.getElementById('mensajes-flotantes-container');
+                    
+                    mensajes.forEach(mensaje => {
+                        mostrarMensajeFlotante(mensaje);
+                    });
+                })
+                .catch(error => console.error('Error al cargar mensajes:', error));
+        }
+
+        function mostrarMensajeFlotante(mensaje) {
+            const container = document.getElementById('mensajes-flotantes-container');
+            
+            const div = document.createElement('div');
+            div.className = 'mensaje-flotante';
+            div.dataset.mensajeId = mensaje.id;
+            
+            div.innerHTML = `
+                <button class="mensaje-flotante-cerrar" onclick="cerrarMensaje(${mensaje.id})">
+                    ✕
+                </button>
+                <p class="mensaje-flotante-contenido">
+                    <i class="fas fa-bullhorn me-2"></i>${mensaje.contenido}
+                </p>
+                <small class="mensaje-flotante-fecha">
+                    <i class="far fa-clock me-1"></i>${mensaje.fecha}
+                </small>
+            `;
+            
+            container.appendChild(div);
+        }
+
+        function cerrarMensaje(mensajeId) {
+            const elemento = document.querySelector(`[data-mensaje-id="${mensajeId}"]`);
+            
+            if (elemento) {
+                // Agregar animación de salida
+                elemento.classList.add('mensaje-saliendo');
+                
+                // Marcar como leído en el servidor
+                fetch(`/api/mensajes-flotantes/marcar-leido/${mensajeId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Eliminar el elemento después de la animación
+                    setTimeout(() => {
+                        elemento.remove();
+                    }, 300);
+                })
+                .catch(error => console.error('Error:', error));
+            }
+        }
     </script>
 </body>
 </html>

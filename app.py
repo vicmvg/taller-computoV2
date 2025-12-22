@@ -319,6 +319,7 @@ class EntregaAlumno(db.Model):
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
+    titulo_tarea = db.Column(db.String(200))  # ✅ NUEVO CAMPO
     archivo_url = db.Column(db.String(300))
     estrellas = db.Column(db.Integer, default=0)
     comentarios = db.Column(db.Text)
@@ -471,6 +472,21 @@ def migrar_bd_fotos():
             logger.info("✅ Migración completada: columna 'foto_perfil' agregada")
         else:
             logger.info("✅ Columna 'foto_perfil' ya existe")
+    except Exception as e:
+        logger.error(f"⚠️ Error en migración: {str(e)}")
+        raise AppError(f"Error en migración: {str(e)}")
+
+def migrar_bd_titulo_tarea():
+    """Migración para agregar columna titulo_tarea"""
+    try:
+        if not column_exists('entrega_alumno', 'titulo_tarea'):
+            logger.info("🔧 Migrando BD: Agregando columna 'titulo_tarea'...")
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE entrega_alumno ADD COLUMN titulo_tarea VARCHAR(200)"))
+                conn.commit()
+            logger.info("✅ Migración completada: columna 'titulo_tarea' agregada")
+        else:
+            logger.info("✅ Columna 'titulo_tarea' ya existe")
     except Exception as e:
         logger.error(f"⚠️ Error en migración: {str(e)}")
         raise AppError(f"Error en migración: {str(e)}")
@@ -926,6 +942,12 @@ def actualizar_foto_perfil():
         flash('No se seleccionó ninguna foto', 'danger')
         return redirect(url_for('panel_alumnos'))
     
+    # ✅ VALIDAR QUE SEA SOLO IMAGEN
+    ext = foto.filename.rsplit('.', 1)[1].lower() if '.' in foto.filename else ''
+    if ext not in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']:
+        flash('⚠️ Solo se permiten archivos de imagen (PNG, JPG, GIF, WEBP)', 'danger')
+        return redirect(url_for('panel_alumnos'))
+    
     try:
         ruta_foto, es_s3 = guardar_archivo(foto)
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
@@ -1330,8 +1352,15 @@ def subir_tarea():
         return redirect(url_for('panel_alumnos'))
     
     archivo = request.files['archivo']
+    titulo_tarea = request.form.get('titulo_tarea', '').strip()  # ✅ OBTENER TÍTULO
+    
     if archivo.filename == '':
         flash('Ningún archivo seleccionado', 'danger')
+        return redirect(url_for('panel_alumnos'))
+    
+    # ✅ VALIDAR QUE HAYA TÍTULO
+    if not titulo_tarea:
+        flash('⚠️ Debes escribir el nombre de la tarea', 'warning')
         return redirect(url_for('panel_alumnos'))
 
     if archivo:
@@ -1344,6 +1373,7 @@ def subir_tarea():
                 alumno_id=alumno.id,
                 nombre_alumno=alumno.nombre_completo,
                 grado_grupo=alumno.grado_grupo,
+                titulo_tarea=titulo_tarea,  # ✅ GUARDAR TÍTULO
                 archivo_url=ruta
             )
             db.session.add(nueva_entrega)
@@ -2063,6 +2093,7 @@ def marcar_mensaje_leido(mensaje_id):
 with app.app_context():
     db.create_all()
     migrar_bd_fotos()
+    migrar_bd_titulo_tarea()  # ✅ AGREGAR ESTA LÍNEA
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

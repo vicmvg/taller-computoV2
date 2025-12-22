@@ -427,11 +427,16 @@
                                         <td>
                                             <div class="d-flex align-items-center">
                                                 <i class="bi bi-file-earmark me-2"></i>
-                                                <!-- ACTUALIZADO: Usar nueva ruta ver_archivo -->
-                                                <a href="{{ url_for('ver_archivo', archivo_path=entrega.archivo_url) }}" 
-                                                   target="_blank" class="text-decoration-none">
-                                                    Ver mi archivo
-                                                </a>
+                                                <div>
+                                                    <!-- ✅ MOSTRAR EL TÍTULO DE LA TAREA -->
+                                                    {% if entrega.titulo_tarea %}
+                                                    <strong>{{ entrega.titulo_tarea }}</strong><br>
+                                                    {% endif %}
+                                                    <a href="{{ url_for('ver_archivo', archivo_path=entrega.archivo_url) }}" 
+                                                       target="_blank" class="text-decoration-none small">
+                                                        Ver archivo
+                                                    </a>
+                                                </div>
                                             </div>
                                         </td>
                                         <td>

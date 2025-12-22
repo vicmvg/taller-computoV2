@@ -29,6 +29,14 @@
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
+        /* ✅ Estilos para el título de la tarea */
+        .titulo-tarea {
+            max-width: 200px;
+            word-wrap: break-word;
+        }
+        .titulo-tarea strong {
+            color: #0d6efd;
+        }
     </style>
 </head>
 <body>
@@ -184,6 +192,7 @@
                                         <th>Fecha</th>
                                         <th>Alumno</th>
                                         <th>Grado</th>
+                                        <th><i class="bi bi-bookmark-fill text-info"></i> Nombre de la Tarea</th> <!-- ✅ NUEVA COLUMNA -->
                                         <th>Archivo</th>
                                         <th>Calificación</th>
                                         <th>Comentarios</th>
@@ -194,10 +203,22 @@
                                     {% for entrega in entregas %}
                                     <tr>
                                         <td>{{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') }}</td>
-                                        <td>{{ entrega.nombre_alumno }}</td>
-                                        <td>{{ entrega.grado_grupo }}</td>
+                                        <td><strong>{{ entrega.nombre_alumno }}</strong></td>
+                                        <td><span class="badge bg-primary">{{ entrega.grado_grupo }}</span></td>
+                                        
+                                        <!-- ✅ MOSTRAR EL TÍTULO DE LA TAREA -->
+                                        <td class="titulo-tarea">
+                                            {% if entrega.titulo_tarea %}
+                                                <i class="bi bi-file-text me-1 text-info"></i>
+                                                <strong>{{ entrega.titulo_tarea }}</strong>
+                                            {% else %}
+                                                <span class="text-muted fst-italic">
+                                                    <i class="bi bi-dash-circle me-1"></i>Sin título
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        
                                         <td>
-                                            <!-- ACTUALIZADO: Usar nueva ruta ver_archivo -->
                                             <a href="{{ url_for('ver_archivo', archivo_path=entrega.archivo_url) }}" 
                                                target="_blank" class="btn btn-sm btn-outline-primary">
                                                 <i class="bi bi-eye"></i> Ver Archivo
@@ -237,19 +258,36 @@
                                     <div class="modal fade" id="gradeModal{{ entrega.id }}" tabindex="-1">
                                         <div class="modal-dialog">
                                             <div class="modal-content">
-                                                <div class="modal-header">
-                                                    <h5 class="modal-title">Calificar Entrega</h5>
-                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                <div class="modal-header bg-primary text-white">
+                                                    <h5 class="modal-title">
+                                                        <i class="bi bi-star-fill me-2"></i>Calificar Entrega
+                                                    </h5>
+                                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                                                 </div>
                                                 <form method="POST" action="{{ url_for('calificar_entrega', id=entrega.id) }}">
                                                     <div class="modal-body">
-                                                        <p>
-                                                            <strong>Alumno:</strong> {{ entrega.nombre_alumno }}<br>
-                                                            <strong>Grado:</strong> {{ entrega.grado_grupo }}<br>
-                                                            <strong>Fecha:</strong> {{ entrega.fecha_entrega.strftime('%d/%m/%Y') }}
-                                                        </p>
+                                                        <div class="alert alert-light border">
+                                                            <p class="mb-2">
+                                                                <strong><i class="bi bi-person-fill text-primary"></i> Alumno:</strong> {{ entrega.nombre_alumno }}
+                                                            </p>
+                                                            <p class="mb-2">
+                                                                <strong><i class="bi bi-mortarboard-fill text-success"></i> Grado:</strong> {{ entrega.grado_grupo }}
+                                                            </p>
+                                                            <!-- ✅ MOSTRAR TÍTULO EN EL MODAL -->
+                                                            {% if entrega.titulo_tarea %}
+                                                            <p class="mb-2">
+                                                                <strong><i class="bi bi-bookmark-fill text-info"></i> Tarea:</strong> {{ entrega.titulo_tarea }}
+                                                            </p>
+                                                            {% endif %}
+                                                            <p class="mb-0">
+                                                                <strong><i class="bi bi-calendar3 text-warning"></i> Fecha:</strong> {{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') }}
+                                                            </p>
+                                                        </div>
+                                                        
                                                         <div class="mb-3">
-                                                            <label class="form-label">Calificación (1-5 estrellas)</label>
+                                                            <label class="form-label fw-bold">
+                                                                <i class="bi bi-star-fill text-warning"></i> Calificación (1-5 estrellas)
+                                                            </label>
                                                             <div class="star-rating mb-2">
                                                                 {% for i in range(1, 6) %}
                                                                 <div class="form-check form-check-inline">
@@ -266,13 +304,19 @@
                                                             </div>
                                                         </div>
                                                         <div class="mb-3">
-                                                            <label class="form-label">Comentarios</label>
-                                                            <textarea class="form-control" name="comentarios" rows="3">{{ entrega.comentarios or '' }}</textarea>
+                                                            <label class="form-label fw-bold">
+                                                                <i class="bi bi-chat-left-text"></i> Comentarios
+                                                            </label>
+                                                            <textarea class="form-control" name="comentarios" rows="3" placeholder="Escribe tus observaciones...">{{ entrega.comentarios or '' }}</textarea>
                                                         </div>
                                                     </div>
                                                     <div class="modal-footer">
-                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                                                        <button type="submit" class="btn btn-primary">Guardar Calificación</button>
+                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                                            <i class="bi bi-x-circle"></i> Cancelar
+                                                        </button>
+                                                        <button type="submit" class="btn btn-primary">
+                                                            <i class="bi bi-check-circle"></i> Guardar Calificación
+                                                        </button>
                                                     </div>
                                                 </form>
                                             </div>

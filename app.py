@@ -428,6 +428,37 @@ class BoletaGenerada(db.Model):
     generado_por = db.Column(db.String(100))
     alumno = db.relationship('UsuarioAlumno', backref=db.backref('boletas', lazy=True))
 
+# --- NUEVOS MODELOS PARA PAGOS ---
+class Pago(db.Model):
+    """Modelo para gestionar pagos de alumnos"""
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    concepto = db.Column(db.String(200), nullable=False)
+    monto_total = db.Column(db.Float, nullable=False)
+    monto_pagado = db.Column(db.Float, default=0)
+    monto_pendiente = db.Column(db.Float)
+    tipo_pago = db.Column(db.String(20))  # 'completo' o 'diferido'
+    estado = db.Column(db.String(20), default='pendiente')
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_vencimiento = db.Column(db.Date, nullable=True)
+    grado_grupo = db.Column(db.String(20))
+    creado_por = db.Column(db.String(100))
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('pagos', lazy=True))
+
+class ReciboPago(db.Model):
+    """Modelo para almacenar recibos de pago individuales"""
+    id = db.Column(db.Integer, primary_key=True)
+    pago_id = db.Column(db.Integer, db.ForeignKey('pago.id'), nullable=False)
+    numero_recibo = db.Column(db.String(50), unique=True, nullable=False)
+    monto = db.Column(db.Float, nullable=False)
+    metodo_pago = db.Column(db.String(50))
+    archivo_url = db.Column(db.String(500))
+    nombre_archivo = db.Column(db.String(200))
+    fecha_pago = db.Column(db.DateTime, default=datetime.utcnow)
+    recibido_por = db.Column(db.String(100))
+    observaciones = db.Column(db.Text)
+    pago = db.relationship('Pago', backref=db.backref('recibos', lazy=True))
+
 # --- FUNCIONES AUXILIARES REFACTORIZADAS ---
 
 def get_current_user():
@@ -490,6 +521,149 @@ def migrar_bd_titulo_tarea():
     except Exception as e:
         logger.error(f"⚠️ Error en migración: {str(e)}")
         raise AppError(f"Error en migración: {str(e)}")
+
+def migrar_bd_pagos():
+    """Migración para crear tablas de pagos si no existen"""
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        tablas_existentes = inspector.get_table_names()
+        
+        if 'pago' not in tablas_existentes or 'recibo_pago' not in tablas_existentes:
+            logger.info("🔧 Creando tablas de pagos...")
+            db.create_all()
+            logger.info("✅ Tablas de pagos creadas correctamente")
+        else:
+            logger.info("✅ Tablas de pagos ya existen")
+    except Exception as e:
+        logger.error(f"⚠️ Error en migración de pagos: {str(e)}")
+
+def generar_recibo_pdf(recibo, alumno, pago):
+    """Genera un recibo de pago en PDF con formato profesional"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    elementos = []
+    styles = getSampleStyleSheet()
+    
+    # Estilo personalizado para el título
+    titulo_style = ParagraphStyle(
+        'TituloRecibo',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1e293b'),
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    # Encabezado
+    elementos.append(Paragraph("RECIBO DE PAGO", titulo_style))
+    elementos.append(Spacer(1, 0.3*inch))
+    
+    # Información del recibo
+    info_recibo = [
+        ['Número de Recibo:', recibo.numero_recibo, 'Fecha:', recibo.fecha_pago.strftime('%d/%m/%Y')],
+        ['', '', 'Hora:', recibo.fecha_pago.strftime('%H:%M:%S')]
+    ]
+    
+    tabla_info = Table(info_recibo, colWidths=[1.5*inch, 2.5*inch, 1*inch, 2*inch])
+    tabla_info.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#475569')),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    
+    elementos.append(tabla_info)
+    elementos.append(Spacer(1, 0.3*inch))
+    
+    # Línea separadora
+    elementos.append(Table([['']], colWidths=[7*inch], 
+                          style=[('LINEABOVE', (0,0), (-1,0), 2, colors.HexColor('#3b82f6'))]))
+    elementos.append(Spacer(1, 0.2*inch))
+    
+    # Información del alumno
+    datos_alumno = [
+        ['DATOS DEL ALUMNO', ''],
+        ['Nombre:', alumno.nombre_completo],
+        ['Grado y Grupo:', alumno.grado_grupo],
+        ['Matrícula:', alumno.username]
+    ]
+    
+    tabla_alumno = Table(datos_alumno, colWidths=[2*inch, 5*inch])
+    tabla_alumno.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
+        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('PADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+    ]))
+    
+    elementos.append(tabla_alumno)
+    elementos.append(Spacer(1, 0.3*inch))
+    
+    # Detalle del pago
+    datos_pago = [
+        ['DETALLE DEL PAGO', '', ''],
+        ['Concepto:', pago.concepto, ''],
+        ['Monto Total:', f'${pago.monto_total:,.2f}', ''],
+        ['Monto Pagado:', f'${recibo.monto:,.2f}', ''],
+    ]
+    
+    # Agregar saldo pendiente si es pago diferido
+    if pago.tipo_pago == 'diferido':
+        nuevo_pendiente = pago.monto_pendiente - recibo.monto if pago.monto_pendiente else pago.monto_total - recibo.monto
+        datos_pago.append(['Saldo Pendiente:', f'${nuevo_pendiente:,.2f}', ''])
+    
+    datos_pago.extend([
+        ['Método de Pago:', recibo.metodo_pago.capitalize(), ''],
+        ['Recibido por:', recibo.recibido_por, '']
+    ])
+    
+    tabla_pago = Table(datos_pago, colWidths=[2*inch, 3*inch, 2*inch])
+    tabla_pago.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
+        ('SPAN', (0, 0), (-1, 0)),
+        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('PADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, -2), (-1, -1), colors.HexColor('#fef3c7')),
+    ]))
+    
+    elementos.append(tabla_pago)
+    elementos.append(Spacer(1, 0.4*inch))
+    
+    # Observaciones si las hay
+    if recibo.observaciones:
+        elementos.append(Paragraph(f"<b>Observaciones:</b> {recibo.observaciones}", styles['Normal']))
+        elementos.append(Spacer(1, 0.3*inch))
+    
+    # Línea de firma
+    elementos.append(Spacer(1, 0.5*inch))
+    firma = Table([['_' * 50]], colWidths=[3.5*inch])
+    firma.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    ]))
+    elementos.append(firma)
+    elementos.append(Paragraph("Firma y Sello", styles['Normal']))
+    
+    # Footer
+    elementos.append(Spacer(1, 0.5*inch))
+    footer_text = f"<i>Recibo generado electrónicamente el {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</i>"
+    elementos.append(Paragraph(footer_text, styles['Italic']))
+    
+    # Construir PDF
+    doc.build(elementos)
+    buffer.seek(0)
+    return buffer
 
 def guardar_archivo(archivo):
     """
@@ -2088,12 +2262,271 @@ def marcar_mensaje_leido(mensaje_id):
     
     return jsonify({'status': 'ok'})
 
+# --- RUTAS PARA GESTIÓN DE PAGOS ---
+
+@app.route('/admin/pagos')
+@require_profesor
+def gestionar_pagos():
+    """Vista principal de gestión de pagos"""
+    filtro_grado = request.args.get('grado', 'Todos')
+    filtro_estado = request.args.get('estado', 'todos')
+    
+    query = Pago.query.join(UsuarioAlumno)
+    
+    if filtro_grado != 'Todos':
+        query = query.filter(UsuarioAlumno.grado_grupo == filtro_grado)
+    
+    if filtro_estado != 'todos':
+        query = query.filter(Pago.estado == filtro_estado)
+    
+    pagos = query.order_by(Pago.fecha_creacion.desc()).all()
+    
+    grupos_disponibles = db.session.query(UsuarioAlumno.grado_grupo).distinct().all()
+    grupos_disponibles = sorted([g[0] for g in grupos_disponibles])
+    
+    # Estadísticas
+    total_pagos = Pago.query.count()
+    monto_total_cobrado = db.session.query(db.func.sum(ReciboPago.monto)).scalar() or 0
+    pagos_pendientes = Pago.query.filter_by(estado='pendiente').count()
+    
+    return render_template('admin/pagos.html',
+                         pagos=pagos,
+                         grupos_disponibles=grupos_disponibles,
+                         filtro_grado=filtro_grado,
+                         filtro_estado=filtro_estado,
+                         total_pagos=total_pagos,
+                         monto_total_cobrado=monto_total_cobrado,
+                         pagos_pendientes=pagos_pendientes)
+
+@app.route('/admin/pagos/crear', methods=['GET', 'POST'])
+@require_profesor
+def crear_pago():
+    """Crear nuevo pago (individual o grupal)"""
+    if request.method == 'POST':
+        tipo_creacion = request.form.get('tipo_creacion')  # 'individual' o 'grupal'
+        concepto = request.form.get('concepto')
+        monto = float(request.form.get('monto'))
+        tipo_pago = request.form.get('tipo_pago')  # 'completo' o 'diferido'
+        fecha_vencimiento = request.form.get('fecha_vencimiento')
+        
+        try:
+            if tipo_creacion == 'individual':
+                alumno_id = int(request.form.get('alumno_id'))
+                alumnos = [UsuarioAlumno.query.get(alumno_id)]
+            else:  # grupal
+                grado = request.form.get('grado')
+                grupo = request.form.get('grupo')
+                grado_grupo = f"{grado}{grupo}"
+                alumnos = UsuarioAlumno.query.filter_by(
+                    grado_grupo=grado_grupo,
+                    activo=True
+                ).all()
+            
+            # Crear pago para cada alumno
+            pagos_creados = 0
+            for alumno in alumnos:
+                nuevo_pago = Pago(
+                    alumno_id=alumno.id,
+                    concepto=concepto,
+                    monto_total=monto,
+                    monto_pagado=0,
+                    monto_pendiente=monto,
+                    tipo_pago=tipo_pago,
+                    estado='pendiente',
+                    grado_grupo=alumno.grado_grupo,
+                    creado_por=session.get('user', 'Sistema'),
+                    fecha_vencimiento=datetime.strptime(fecha_vencimiento, '%Y-%m-%d').date() if fecha_vencimiento else None
+                )
+                db.session.add(nuevo_pago)
+                pagos_creados += 1
+            
+            db.session.commit()
+            flash(f'✅ {pagos_creados} pago(s) creado(s) correctamente', 'success')
+            return redirect(url_for('gestionar_pagos'))
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error al crear pagos: {str(e)}")
+            flash(f'Error al crear pagos: {str(e)}', 'danger')
+    
+    # GET
+    alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
+    grupos_disponibles = db.session.query(UsuarioAlumno.grado_grupo).distinct().all()
+    grupos_disponibles = sorted([g[0] for g in grupos_disponibles])
+    
+    return render_template('admin/crear_pago.html',
+                         alumnos=alumnos,
+                         grupos_disponibles=grupos_disponibles)
+
+@app.route('/admin/pagos/<int:pago_id>/registrar-pago', methods=['POST'])
+@require_profesor
+def registrar_pago(pago_id):
+    """Registrar un pago (completo o parcial) y generar recibo"""
+    pago = Pago.query.get_or_404(pago_id)
+    
+    try:
+        monto_pagado = float(request.form.get('monto_pagado'))
+        metodo_pago = request.form.get('metodo_pago')
+        observaciones = request.form.get('observaciones', '')
+        
+        # Validar monto
+        if monto_pagado <= 0:
+            flash('El monto debe ser mayor a 0', 'danger')
+            return redirect(url_for('gestionar_pagos'))
+        
+        if monto_pagado > pago.monto_pendiente:
+            flash(f'El monto no puede ser mayor al pendiente (${pago.monto_pendiente:,.2f})', 'danger')
+            return redirect(url_for('gestionar_pagos'))
+        
+        # Generar número de recibo único
+        fecha_actual = datetime.now()
+        numero_recibo = f"REC-{fecha_actual.strftime('%Y%m%d%H%M%S')}-{pago.id}"
+        
+        # Crear recibo
+        nuevo_recibo = ReciboPago(
+            pago_id=pago.id,
+            numero_recibo=numero_recibo,
+            monto=monto_pagado,
+            metodo_pago=metodo_pago,
+            recibido_por=session.get('user', 'Sistema'),
+            observaciones=observaciones
+        )
+        
+        db.session.add(nuevo_recibo)
+        db.session.flush()  # Para obtener el ID del recibo
+        
+        # Generar PDF del recibo
+        alumno = UsuarioAlumno.query.get(pago.alumno_id)
+        buffer_pdf = generar_recibo_pdf(nuevo_recibo, alumno, pago)
+        
+        # Subir PDF a S3/iDrive
+        nombre_archivo = f"recibo_{numero_recibo}.pdf"
+        key_s3 = f"pagos/recibos/{pago.grado_grupo}/{nombre_archivo}"
+        
+        if s3_manager.is_configured:
+            try:
+                url_archivo = s3_manager.upload_file(buffer_pdf, key_s3, 'application/pdf')
+                nuevo_recibo.archivo_url = key_s3
+                nuevo_recibo.nombre_archivo = nombre_archivo
+                logger.info(f"✅ Recibo subido a S3: {key_s3}")
+            except S3UploadError as e:
+                logger.warning(f"⚠️ No se pudo subir a S3: {e}")
+                # Guardar localmente como respaldo
+                ruta_local = os.path.join(UPLOAD_FOLDER, 'pagos', 'recibos')
+                os.makedirs(ruta_local, exist_ok=True)
+                with open(os.path.join(ruta_local, nombre_archivo), 'wb') as f:
+                    f.write(buffer_pdf.getvalue())
+                nuevo_recibo.archivo_url = f"pagos/recibos/{nombre_archivo}"
+                nuevo_recibo.nombre_archivo = nombre_archivo
+        
+        # Actualizar estado del pago
+        pago.monto_pagado += monto_pagado
+        pago.monto_pendiente -= monto_pagado
+        
+        if pago.monto_pendiente <= 0:
+            pago.estado = 'completado'
+        else:
+            pago.estado = 'parcial'
+        
+        db.session.commit()
+        
+        flash(f'✅ Pago registrado correctamente. Recibo: {numero_recibo}', 'success')
+        
+        # Descargar el recibo automáticamente
+        buffer_pdf.seek(0)
+        return send_file(
+            buffer_pdf,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=nombre_archivo
+        )
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error al registrar pago: {str(e)}")
+        flash(f'Error al registrar pago: {str(e)}', 'danger')
+        return redirect(url_for('gestionar_pagos'))
+
+@app.route('/admin/pagos/recibos')
+@require_profesor
+def ver_recibos():
+    """Ver historial de recibos generados"""
+    filtro_grado = request.args.get('grado', 'Todos')
+    
+    query = ReciboPago.query.join(Pago).join(UsuarioAlumno)
+    
+    if filtro_grado != 'Todos':
+        query = query.filter(UsuarioAlumno.grado_grupo == filtro_grado)
+    
+    recibos = query.order_by(ReciboPago.fecha_pago.desc()).all()
+    
+    grupos_disponibles = db.session.query(UsuarioAlumno.grado_grupo).distinct().all()
+    grupos_disponibles = sorted([g[0] for g in grupos_disponibles])
+    
+    return render_template('admin/recibos.html',
+                         recibos=recibos,
+                         grupos_disponibles=grupos_disponibles,
+                         filtro_grado=filtro_grado)
+
+@app.route('/admin/pagos/recibos/descargar/<int:recibo_id>')
+@require_profesor
+def descargar_recibo(recibo_id):
+    """Descargar recibo desde S3/iDrive"""
+    recibo = ReciboPago.query.get_or_404(recibo_id)
+    
+    try:
+        if recibo.archivo_url and s3_manager.is_configured:
+            file_stream, content_type = s3_manager.download_file(recibo.archivo_url)
+            return send_file(
+                file_stream,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=recibo.nombre_archivo
+            )
+        else:
+            # Respaldo local
+            return send_from_directory(
+                os.path.join(UPLOAD_FOLDER, 'pagos', 'recibos'),
+                recibo.nombre_archivo,
+                as_attachment=True
+            )
+    except Exception as e:
+        logger.error(f"Error al descargar recibo: {str(e)}")
+        flash(f'Error al descargar recibo: {str(e)}', 'danger')
+        return redirect(url_for('ver_recibos'))
+
+@app.route('/admin/pagos/<int:pago_id>/eliminar')
+@require_profesor
+def eliminar_pago(pago_id):
+    """Eliminar un pago y sus recibos asociados"""
+    pago = Pago.query.get_or_404(pago_id)
+    
+    try:
+        # Eliminar recibos asociados de S3
+        for recibo in pago.recibos:
+            if recibo.archivo_url and s3_manager.is_configured:
+                try:
+                    s3_manager.delete_file(recibo.archivo_url)
+                except S3UploadError as e:
+                    logger.warning(f"⚠️ No se pudo eliminar recibo de S3: {e}")
+        
+        db.session.delete(pago)
+        db.session.commit()
+        flash('Pago eliminado correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error al eliminar pago: {str(e)}")
+        flash(f'Error al eliminar pago: {str(e)}', 'danger')
+    
+    return redirect(url_for('gestionar_pagos'))
+
 # --- INICIALIZADOR ---
 
 with app.app_context():
     db.create_all()
     migrar_bd_fotos()
-    migrar_bd_titulo_tarea()  # ✅ AGREGAR ESTA LÍNEA
+    migrar_bd_titulo_tarea()
+    migrar_bd_pagos()  # ✅ AGREGAR ESTA LÍNEA
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

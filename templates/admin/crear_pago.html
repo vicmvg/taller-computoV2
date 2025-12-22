@@ -1,0 +1,148 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row mb-4">
+        <div class="col">
+            <h2><i class="fas fa-plus-circle"></i> Crear Nuevo Pago</h2>
+            <p class="text-muted">Genera pagos individuales o grupales</p>
+        </div>
+        <div class="col-auto">
+            <a href="{{ url_for('gestionar_pagos') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Volver
+            </a>
+        </div>
+    </div>
+
+    <div class="glass-card">
+        <form method="POST">
+            <!-- Tipo de creación -->
+            <div class="mb-4">
+                <label class="form-label fw-bold">Tipo de Pago</label>
+                <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" name="tipo_creacion" id="tipo_individual" value="individual" checked>
+                    <label class="btn btn-outline-primary" for="tipo_individual">
+                        <i class="fas fa-user"></i> Individual
+                    </label>
+                    
+                    <input type="radio" class="btn-check" name="tipo_creacion" id="tipo_grupal" value="grupal">
+                    <label class="btn btn-outline-primary" for="tipo_grupal">
+                        <i class="fas fa-users"></i> Grupal
+                    </label>
+                </div>
+            </div>
+
+            <!-- Selección Individual -->
+            <div id="seccion_individual" class="mb-4">
+                <label class="form-label fw-bold">Seleccionar Alumno</label>
+                <select name="alumno_id" class="form-select" id="select_alumno">
+                    <option value="">-- Seleccionar alumno --</option>
+                    {% for alumno in alumnos %}
+                    <option value="{{ alumno.id }}">
+                        {{ alumno.nombre_completo }} - {{ alumno.grado_grupo }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Selección Grupal -->
+            <div id="seccion_grupal" class="mb-4" style="display: none;">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Grado</label>
+                        <select name="grado" class="form-select" id="select_grado">
+                            <option value="">-- Seleccionar --</option>
+                            {% for g in range(1, 7) %}
+                            <option value="{{ g }}">{{ g }}°</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Grupo</label>
+                        <select name="grupo" class="form-select" id="select_grupo">
+                            <option value="">-- Seleccionar --</option>
+                            <option value="A">A</option>
+                            <option value="B">B</option>
+                            <option value="C">C</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="fas fa-info-circle"></i> Se creará un pago para cada alumno activo del grupo seleccionado
+                </div>
+            </div>
+
+            <!-- Datos del Pago -->
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Datos del Pago</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Concepto</label>
+                        <input type="text" name="concepto" class="form-control" 
+                               placeholder="Ej: Colegiatura Enero 2025" required>
+                        <small class="text-muted">Describe brevemente el concepto del pago</small>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Monto</label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <input type="number" step="0.01" name="monto" class="form-control" 
+                                       placeholder="0.00" required>
+                                <span class="input-group-text">MXN</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Fecha de Vencimiento</label>
+                            <input type="date" name="fecha_vencimiento" class="form-control">
+                            <small class="text-muted">Opcional</small>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Tipo de Pago</label>
+                        <select name="tipo_pago" class="form-select" required>
+                            <option value="completo">💰 Pago Completo (debe pagarse todo de una vez)</option>
+                            <option value="diferido">📅 Pago Diferido (puede pagarse en parcialidades)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botones -->
+            <div class="text-end">
+                <a href="{{ url_for('gestionar_pagos') }}" class="btn btn-secondary btn-lg">
+                    <i class="fas fa-times"></i> Cancelar
+                </a>
+                <button type="submit" class="btn btn-success btn-lg">
+                    <i class="fas fa-check"></i> Crear Pago(s)
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Cambiar entre individual y grupal
+document.querySelectorAll('input[name="tipo_creacion"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        if (this.value === 'individual') {
+            document.getElementById('seccion_individual').style.display = 'block';
+            document.getElementById('seccion_grupal').style.display = 'none';
+            document.getElementById('select_alumno').required = true;
+            document.getElementById('select_grado').required = false;
+            document.getElementById('select_grupo').required = false;
+        } else {
+            document.getElementById('seccion_individual').style.display = 'none';
+            document.getElementById('seccion_grupal').style.display = 'block';
+            document.getElementById('select_alumno').required = false;
+            document.getElementById('select_grado').required = true;
+            document.getElementById('select_grupo').required = true;
+        }
+    });
+});
+</script>
+{% endblock %}

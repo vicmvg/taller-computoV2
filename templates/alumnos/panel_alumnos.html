@@ -333,15 +333,37 @@
                     </div>
                     <div class="card-body">
                         <form method="POST" action="{{ url_for('subir_tarea') }}" enctype="multipart/form-data">
+                            <!-- ✅ NUEVO CAMPO PARA EL TÍTULO -->
                             <div class="mb-3">
-                                <label for="archivo" class="form-label">Seleccionar archivo</label>
+                                <label for="titulo_tarea" class="form-label">
+                                    <i class="bi bi-pencil-square"></i> Nombre de la tarea
+                                    <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="titulo_tarea" 
+                                       name="titulo_tarea" 
+                                       placeholder="Ejemplo: Actividad de matemáticas página 45"
+                                       maxlength="200"
+                                       required>
+                                <div class="form-text">
+                                    <i class="bi bi-info-circle"></i> 
+                                    Describe brevemente qué tarea estás entregando
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="archivo" class="form-label">
+                                    <i class="bi bi-file-earmark-arrow-up"></i> Seleccionar archivo
+                                    <span class="text-danger">*</span>
+                                </label>
                                 <input class="form-control" type="file" id="archivo" name="archivo" required>
                                 <div class="form-text">Formatos permitidos: PDF, Word, PowerPoint, imágenes, etc.</div>
                             </div>
+                            
                             <div class="alert alert-info">
                                 <i class="bi bi-info-circle"></i> El archivo se asociará automáticamente a tu usuario.
-                                No necesitas escribir tu nombre nuevamente.
                             </div>
+                            
                             <button type="submit" class="btn btn-success">
                                 <i class="bi bi-upload"></i> Enviar Tarea
                             </button>

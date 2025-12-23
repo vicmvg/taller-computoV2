@@ -64,12 +64,12 @@
                     <h4 class="mb-4"><i class="bi bi-pc-display-horizontal"></i> Taller</h4>
                     <ul class="nav flex-column">
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('alumno_dashboard') }}">
+                            <a class="nav-link" href="{{ url_for('panel_alumnos') }}">
                                 <i class="bi bi-house-door"></i> Inicio
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('alumno_tareas') }}">
+                            <a class="nav-link" href="{{ url_for('panel_alumnos') }}">
                                 <i class="bi bi-file-earmark-text"></i> Tareas
                             </a>
                         </li>
@@ -87,7 +87,7 @@
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('logout') }}">
+                            <a class="nav-link" href="{{ url_for('logout_alumnos') }}">
                                 <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
                             </a>
                         </li>
@@ -123,8 +123,8 @@
                     <div class="row">
                         {% for archivo in archivos %}
                         <div class="col-md-6 col-lg-4 mb-4">
-                            <div class="card archivo-card {% if not archivo.leido %}archivo-nuevo{% endif %}"
-                                 onclick="window.location.href='{{ url_for('descargar_archivo_alumno', archivo_id=archivo.id) }}'">
+                        <div class="col-md-6 col-lg-4 mb-4">
+                            <div class="card archivo-card {% if not archivo.leido %}archivo-nuevo{% endif %}">
                                 <div class="card-body">
                                     <div class="d-flex align-items-start">
                                         <div class="flex-shrink-0">

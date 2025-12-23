@@ -2614,15 +2614,20 @@ def solicitar_archivo():
         db.session.commit()
         
         flash('✅ Solicitud enviada correctamente. El profesor la revisará pronto.', 'success')
-        return redirect(url_for('panel_alumnos'))
+        return redirect(url_for('panel_alumnos'))  # CAMBIO 2: Redirigir a panel_alumnos
     
     # GET - Mostrar formulario y historial
     alumno = UsuarioAlumno.query.get(alumno_id)
     solicitudes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id).order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
     
+    # CAMBIO 1: Contar solicitudes pendientes antes del render_template
+    pendientes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id, estado='pendiente').count()
+    
+    # CAMBIO 3: Agregar pendientes al render_template
     return render_template('alumnos/solicitar_archivo.html', 
                          alumno=alumno,
-                         solicitudes=solicitudes)
+                         solicitudes=solicitudes,
+                         pendientes=pendientes)
 
 
 @app.route('/alumno/mis-archivos')

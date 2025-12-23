@@ -250,6 +250,18 @@
                                 <i class="fas fa-comments"></i> Chat
                             </a>
                         </li>
+                        <!-- 🆕 NUEVAS SECCIONES DE ARCHIVOS -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('ver_mis_archivos') }}">
+                                <i class="bi bi-folder-fill"></i> Mis Archivos
+                                <span id="badge-archivos-nuevos"></span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('solicitar_archivo') }}">
+                                <i class="bi bi-file-earmark-plus"></i> Solicitar Archivo
+                            </a>
+                        </li>
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('logout_alumnos') }}">
                                 <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
@@ -866,6 +878,28 @@
                 .catch(error => console.error('Error:', error));
             }
         }
+    </script>
+
+    <!-- 🆕 SCRIPT PARA NOTIFICACIONES DE ARCHIVOS NUEVOS -->
+    <script>
+        // Actualizar badge de archivos nuevos cada 30 segundos
+        function actualizarBadgeArchivos() {
+            fetch('/api/archivos-nuevos/cantidad')
+                .then(response => response.json())
+                .then(data => {
+                    const badge = document.getElementById('badge-archivos-nuevos');
+                    if (data.cantidad > 0) {
+                        badge.innerHTML = `<span class="badge bg-danger rounded-pill ms-2">${data.cantidad}</span>`;
+                    } else {
+                        badge.innerHTML = '';
+                    }
+                })
+                .catch(error => console.error('Error al obtener archivos nuevos:', error));
+        }
+
+        // Llamar al cargar la página y cada 30 segundos
+        actualizarBadgeArchivos();
+        setInterval(actualizarBadgeArchivos, 30000);
     </script>
 </body>
 </html>

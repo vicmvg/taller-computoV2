@@ -83,6 +83,23 @@
                                 <i class="bi bi-megaphone"></i> Anuncios
                             </a>
                         </li>
+                        <!-- 🆕 SISTEMA DE GESTIÓN DE ARCHIVOS -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('ver_solicitudes_archivo') }}">
+                                <i class="bi bi-file-earmark-text"></i> Solicitudes
+                                <span id="badge-solicitudes-pendientes"></span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('enviar_archivo_directo') }}">
+                                <i class="bi bi-send"></i> Enviar Archivo
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('ver_archivos_enviados') }}">
+                                <i class="bi bi-archive"></i> Historial
+                            </a>
+                        </li>
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('logout') }}">
                                 <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
@@ -378,5 +395,26 @@
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 🆕 SCRIPT PARA NOTIFICACIONES DE SOLICITUDES PENDIENTES -->
+    <script>
+        function actualizarBadgeSolicitudes() {
+            fetch('/api/solicitudes-pendientes/cantidad')
+                .then(response => response.json())
+                .then(data => {
+                    const badge = document.getElementById('badge-solicitudes-pendientes');
+                    if (data.cantidad > 0) {
+                        badge.innerHTML = `<span class="badge bg-warning text-dark rounded-pill ms-2">${data.cantidad}</span>`;
+                    } else {
+                        badge.innerHTML = '';
+                    }
+                })
+                .catch(error => console.error('Error al obtener solicitudes:', error));
+        }
+
+        // Llamar al cargar la página y cada 30 segundos
+        actualizarBadgeSolicitudes();
+        setInterval(actualizarBadgeSolicitudes, 30000);
+    </script>
 </body>
 </html>

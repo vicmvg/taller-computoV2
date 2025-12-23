@@ -514,6 +514,51 @@ class ReciboPago(db.Model):
     recibido_por = db.Column(db.String(100))
     observaciones = db.Column(db.Text)
 
+# --- NUEVOS MODELOS PARA SISTEMA DE ARCHIVOS ---
+
+class SolicitudArchivo(db.Model):
+    """Solicitudes de archivos que los alumnos hacen al profesor"""
+    __tablename__ = 'solicitudes_archivo'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    tipo_documento = db.Column(db.String(100), nullable=False)  # Ej: "Boleta", "Avance Escolar"
+    mensaje = db.Column(db.Text, nullable=False)  # Ej: "Solicito boleta del primer bimestre"
+    estado = db.Column(db.String(20), default='pendiente')  # pendiente, atendida, rechazada
+    fecha_solicitud = db.Column(db.DateTime, default=datetime.now)
+    fecha_respuesta = db.Column(db.DateTime, nullable=True)
+    
+    # Relación con alumno
+    alumno = db.relationship('UsuarioAlumno', backref='solicitudes_archivos')
+
+
+class ArchivoEnviado(db.Model):
+    """Archivos PDF que el profesor envía a los alumnos"""
+    __tablename__ = 'archivos_enviados'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    solicitud_id = db.Column(db.Integer, db.ForeignKey('solicitudes_archivo.id'), nullable=True)  # Puede ser NULL si se envía sin solicitud
+    
+    titulo = db.Column(db.String(200), nullable=False)  # Ej: "Boleta de Calificaciones - Primer Bimestre"
+    mensaje = db.Column(db.Text, nullable=True)  # Mensaje del profesor
+    
+    # Información del archivo
+    archivo_url = db.Column(db.String(500), nullable=False)  # Ruta S3 o local
+    nombre_archivo = db.Column(db.String(200), nullable=False)
+    
+    # Estado
+    leido = db.Column(db.Boolean, default=False)
+    fecha_envio = db.Column(db.DateTime, default=datetime.now)
+    fecha_lectura = db.Column(db.DateTime, nullable=True)
+    
+    # Quien lo envió
+    enviado_por = db.Column(db.String(100), nullable=False)
+    
+    # Relaciones
+    alumno = db.relationship('UsuarioAlumno', backref='archivos_recibidos')
+    solicitud = db.relationship('SolicitudArchivo', backref='archivo_respuesta', uselist=False)
+
 # --- FUNCIONES AUXILIARES OPTIMIZADAS ---
 
 def get_current_user():
@@ -565,6 +610,15 @@ def migrar_bd():
                     conn.commit()
             except Exception as e:
                 log_error(f"Error al agregar columna {columna} a {tabla}: {str(e)}")
+    
+    # Agregar columnas para el sistema de archivos si no existen
+    if not column_exists('solicitudes_archivo', 'id'):
+        log_info("Creando tabla solicitudes_archivo...")
+        db.create_all()
+    
+    if not column_exists('archivos_enviados', 'id'):
+        log_info("Creando tabla archivos_enviados...")
+        db.create_all()
     
     migrar_bd_pagos()
 
@@ -2531,6 +2585,319 @@ def eliminar_pago(pago_id):
         flash(f'Error al eliminar pago: {str(e)}', 'danger')
     
     return redirect(url_for('gestionar_pagos'))
+
+# --- NUEVAS RUTAS PARA SISTEMA DE ARCHIVOS ---
+
+@app.route('/alumno/solicitar-archivo', methods=['GET', 'POST'])
+@require_alumno
+def solicitar_archivo():
+    """Permite al alumno solicitar un archivo al profesor"""
+    alumno_id = session.get('alumno_id')
+    
+    if request.method == 'POST':
+        tipo_documento = request.form.get('tipo_documento')
+        mensaje = request.form.get('mensaje')
+        
+        if not tipo_documento or not mensaje:
+            flash('Debe completar todos los campos', 'danger')
+            return redirect(url_for('solicitar_archivo'))
+        
+        # Crear la solicitud
+        nueva_solicitud = SolicitudArchivo(
+            alumno_id=alumno_id,
+            tipo_documento=tipo_documento,
+            mensaje=mensaje,
+            estado='pendiente'
+        )
+        
+        db.session.add(nueva_solicitud)
+        db.session.commit()
+        
+        flash('✅ Solicitud enviada correctamente. El profesor la revisará pronto.', 'success')
+        return redirect(url_for('panel_alumnos'))
+    
+    # GET - Mostrar formulario y historial
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    solicitudes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id).order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
+    
+    return render_template('alumnos/solicitar_archivo.html', 
+                         alumno=alumno,
+                         solicitudes=solicitudes)
+
+
+@app.route('/alumno/mis-archivos')
+@require_alumno
+def ver_mis_archivos():
+    """Ver todos los archivos que el profesor ha enviado al alumno"""
+    alumno_id = session.get('alumno_id')
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    
+    # Obtener archivos ordenados por fecha
+    archivos = ArchivoEnviado.query.filter_by(alumno_id=alumno_id).order_by(ArchivoEnviado.fecha_envio.desc()).all()
+    
+    # Contar archivos no leídos
+    no_leidos = ArchivoEnviado.query.filter_by(alumno_id=alumno_id, leido=False).count()
+    
+    return render_template('alumnos/mis_archivos.html',
+                         alumno=alumno,
+                         archivos=archivos,
+                         no_leidos=no_leidos)
+
+
+@app.route('/alumno/archivo/<int:archivo_id>/descargar')
+@require_alumno
+def descargar_archivo_alumno(archivo_id):
+    """Descargar un archivo enviado por el profesor"""
+    alumno_id = session.get('alumno_id')
+    archivo = ArchivoEnviado.query.get_or_404(archivo_id)
+    
+    # Verificar que el archivo pertenece al alumno
+    if archivo.alumno_id != alumno_id:
+        flash('No tienes permiso para descargar este archivo', 'danger')
+        return redirect(url_for('ver_mis_archivos'))
+    
+    # Marcar como leído
+    if not archivo.leido:
+        archivo.leido = True
+        archivo.fecha_lectura = datetime.now()
+        db.session.commit()
+    
+    try:
+        # Descargar desde S3 o local
+        if archivo.archivo_url and s3_manager.is_configured:
+            file_stream, content_type = s3_manager.download_file(archivo.archivo_url)
+            return send_file(
+                file_stream,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=archivo.nombre_archivo
+            )
+        else:
+            # Archivo local
+            return send_from_directory(
+                os.path.join(UPLOAD_FOLDER, 'archivos_enviados'),
+                archivo.nombre_archivo,
+                as_attachment=True
+            )
+    except Exception as e:
+        log_error(f"Error al descargar archivo: {str(e)}")
+        flash(f'Error al descargar archivo: {str(e)}', 'danger')
+        return redirect(url_for('ver_mis_archivos'))
+
+
+@app.route('/admin/solicitudes-archivo')
+@require_profesor
+def ver_solicitudes_archivo():
+    """Ver todas las solicitudes de archivos de los alumnos"""
+    filtro_estado = request.args.get('estado', 'todas')
+    
+    query = SolicitudArchivo.query.join(UsuarioAlumno)
+    
+    if filtro_estado != 'todas':
+        query = query.filter(SolicitudArchivo.estado == filtro_estado)
+    
+    solicitudes = query.order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
+    
+    # Contar solicitudes pendientes
+    pendientes = SolicitudArchivo.query.filter_by(estado='pendiente').count()
+    
+    return render_template('admin/solicitudes_archivo.html',
+                         solicitudes=solicitudes,
+                         filtro_estado=filtro_estado,
+                         pendientes=pendientes)
+
+
+@app.route('/admin/solicitudes-archivo/<int:solicitud_id>/responder', methods=['GET', 'POST'])
+@require_profesor
+def responder_solicitud_archivo(solicitud_id):
+    """Responder a una solicitud enviando un archivo"""
+    solicitud = SolicitudArchivo.query.get_or_404(solicitud_id)
+    
+    if request.method == 'POST':
+        archivo = request.files.get('archivo')
+        mensaje = request.form.get('mensaje', '')
+        
+        if not archivo:
+            flash('Debe seleccionar un archivo PDF', 'danger')
+            return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
+        
+        # Validar que sea PDF
+        if not archivo.filename.lower().endswith('.pdf'):
+            flash('Solo se permiten archivos PDF', 'danger')
+            return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
+        
+        try:
+            # Validar archivo
+            file_stream = BytesIO(archivo.read())
+            validator = FileValidator()
+            validator.validate(file_stream, archivo.filename)
+            
+            # Guardar archivo
+            nombre_archivo = secure_filename(archivo.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            nombre_archivo = f"{timestamp}_{nombre_archivo}"
+            
+            # Subir a S3 o guardar localmente
+            if s3_manager.is_configured:
+                key_s3 = f"archivos_enviados/{solicitud.alumno.grado_grupo}/{nombre_archivo}"
+                archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
+                archivo_url = key_s3
+            else:
+                # Guardar localmente
+                ruta_local = os.path.join(UPLOAD_FOLDER, 'archivos_enviados')
+                os.makedirs(ruta_local, exist_ok=True)
+                archivo_path = os.path.join(ruta_local, nombre_archivo)
+                file_stream.seek(0)
+                with open(archivo_path, 'wb') as f:
+                    f.write(file_stream.read())
+                archivo_url = f"archivos_enviados/{nombre_archivo}"
+            
+            # Crear registro de archivo enviado
+            archivo_enviado = ArchivoEnviado(
+                alumno_id=solicitud.alumno_id,
+                solicitud_id=solicitud.id,
+                titulo=solicitud.tipo_documento,
+                mensaje=mensaje,
+                archivo_url=archivo_url,
+                nombre_archivo=nombre_archivo,
+                enviado_por=session.get('user', 'Profesor')
+            )
+            
+            db.session.add(archivo_enviado)
+            
+            # Actualizar estado de la solicitud
+            solicitud.estado = 'atendida'
+            solicitud.fecha_respuesta = datetime.now()
+            
+            db.session.commit()
+            
+            flash(f'✅ Archivo enviado correctamente a {solicitud.alumno.nombre_completo}', 'success')
+            return redirect(url_for('ver_solicitudes_archivo'))
+            
+        except Exception as e:
+            db.session.rollback()
+            log_error(f"Error al enviar archivo: {str(e)}")
+            flash(f'Error al enviar archivo: {str(e)}', 'danger')
+            return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
+    
+    return render_template('admin/responder_solicitud.html', solicitud=solicitud)
+
+
+@app.route('/admin/enviar-archivo-directo', methods=['GET', 'POST'])
+@require_profesor
+def enviar_archivo_directo():
+    """Enviar archivo a un alumno sin que lo haya solicitado"""
+    
+    if request.method == 'POST':
+        alumno_id = request.form.get('alumno_id')
+        titulo = request.form.get('titulo')
+        mensaje = request.form.get('mensaje', '')
+        archivo = request.files.get('archivo')
+        
+        if not alumno_id or not titulo or not archivo:
+            flash('Debe completar todos los campos obligatorios', 'danger')
+            return redirect(url_for('enviar_archivo_directo'))
+        
+        # Validar que sea PDF
+        if not archivo.filename.lower().endswith('.pdf'):
+            flash('Solo se permiten archivos PDF', 'danger')
+            return redirect(url_for('enviar_archivo_directo'))
+        
+        try:
+            alumno = UsuarioAlumno.query.get(alumno_id)
+            if not alumno:
+                flash('Alumno no encontrado', 'danger')
+                return redirect(url_for('enviar_archivo_directo'))
+            
+            # Validar archivo
+            file_stream = BytesIO(archivo.read())
+            validator = FileValidator()
+            validator.validate(file_stream, archivo.filename)
+            
+            # Guardar archivo
+            nombre_archivo = secure_filename(archivo.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            nombre_archivo = f"{timestamp}_{nombre_archivo}"
+            
+            # Subir a S3 o guardar localmente
+            if s3_manager.is_configured:
+                key_s3 = f"archivos_enviados/{alumno.grado_grupo}/{nombre_archivo}"
+                archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
+                archivo_url = key_s3
+            else:
+                # Guardar localmente
+                ruta_local = os.path.join(UPLOAD_FOLDER, 'archivos_enviados')
+                os.makedirs(ruta_local, exist_ok=True)
+                archivo_path = os.path.join(ruta_local, nombre_archivo)
+                file_stream.seek(0)
+                with open(archivo_path, 'wb') as f:
+                    f.write(file_stream.read())
+                archivo_url = f"archivos_enviados/{nombre_archivo}"
+            
+            # Crear registro de archivo enviado (sin solicitud)
+            archivo_enviado = ArchivoEnviado(
+                alumno_id=alumno_id,
+                solicitud_id=None,  # No hay solicitud
+                titulo=titulo,
+                mensaje=mensaje,
+                archivo_url=archivo_url,
+                nombre_archivo=nombre_archivo,
+                enviado_por=session.get('user', 'Profesor')
+            )
+            
+            db.session.add(archivo_enviado)
+            db.session.commit()
+            
+            flash(f'✅ Archivo enviado correctamente a {alumno.nombre_completo}', 'success')
+            return redirect(url_for('enviar_archivo_directo'))
+            
+        except Exception as e:
+            db.session.rollback()
+            log_error(f"Error al enviar archivo: {str(e)}")
+            flash(f'Error al enviar archivo: {str(e)}', 'danger')
+            return redirect(url_for('enviar_archivo_directo'))
+    
+    # GET - Mostrar formulario
+    alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
+    return render_template('admin/enviar_archivo_directo.html', alumnos=alumnos)
+
+
+@app.route('/admin/archivos-enviados')
+@require_profesor
+def ver_archivos_enviados():
+    """Ver historial de todos los archivos enviados"""
+    filtro_alumno = request.args.get('alumno', 'todos')
+    
+    query = ArchivoEnviado.query.join(UsuarioAlumno)
+    
+    if filtro_alumno != 'todos':
+        query = query.filter(ArchivoEnviado.alumno_id == filtro_alumno)
+    
+    archivos = query.order_by(ArchivoEnviado.fecha_envio.desc()).all()
+    alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
+    
+    return render_template('admin/archivos_enviados.html',
+                         archivos=archivos,
+                         alumnos=alumnos,
+                         filtro_alumno=filtro_alumno)
+
+# --- API PARA NOTIFICACIONES ---
+
+@app.route('/api/archivos-nuevos/cantidad')
+@require_alumno
+def cantidad_archivos_nuevos():
+    """API para obtener la cantidad de archivos no leídos del alumno"""
+    alumno_id = session.get('alumno_id')
+    cantidad = ArchivoEnviado.query.filter_by(alumno_id=alumno_id, leido=False).count()
+    return jsonify({'cantidad': cantidad})
+
+
+@app.route('/api/solicitudes-pendientes/cantidad')
+@require_profesor
+def cantidad_solicitudes_pendientes():
+    """API para obtener la cantidad de solicitudes pendientes"""
+    cantidad = SolicitudArchivo.query.filter_by(estado='pendiente').count()
+    return jsonify({'cantidad': cantidad})
 
 # --- INICIALIZADOR ---
 

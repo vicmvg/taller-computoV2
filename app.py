@@ -3,17 +3,12 @@ import boto3
 import qrcode
 import magic
 import logging
-import time
 from datetime import datetime, timedelta
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
-from sqlalchemy.orm import joinedload
-from sqlalchemy import func, case, text, inspect
 
 # --- IMPORTS PARA PDF ---
 from reportlab.lib.pagesizes import letter, A4
@@ -24,26 +19,29 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from io import BytesIO
 
-# --- CONFIGURACIÓN DE LOGGING OPTIMIZADO ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# --- CONFIGURACIÓN DE LOGGING ---
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Helper functions para logging
 def log_info(message):
     logger.info(f"✅ {message}")
 
 def log_error(message, error=None):
+    msg = f"❌ {message}"
     if error:
-        logger.error(f"❌ {message}: {str(error)}")
-    else:
-        logger.error(f"❌ {message}")
+        msg += f": {str(error)}"
+    logger.error(msg)
 
 def log_warning(message):
     logger.warning(f"⚠️ {message}")
 
-# --- CONFIGURACIÓN INICIAL OPTIMIZADA ---
+# --- CONFIGURACIÓN INICIAL ---
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_desarrollo_optimizada')
-app.permanent_session_lifetime = timedelta(minutes=30)
+app.secret_key = 'clave_secreta_desarrollo'
+
+# Configuración de sesión
+app.permanent_session_lifetime = timedelta(minutes=10)
 
 # Configuración de validación de archivos
 ALLOWED_EXTENSIONS = {
@@ -53,52 +51,51 @@ ALLOWED_EXTENSIONS = {
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
-# --- THREAD POOL PARA TAREAS ASINCRÓNICAS ---
-executor = ThreadPoolExecutor(max_workers=10)
-
-def ejecutar_async(func, *args, **kwargs):
-    return executor.submit(func, *args, **kwargs)
-
-# --- CLASES AUXILIARES OPTIMIZADAS ---
+# --- CLASES AUXILIARES REFACTORIZADAS ---
 
 class AppError(Exception):
+    """Excepción base para errores de la aplicación"""
     pass
 
 class FileValidationError(AppError):
+    """Error de validación de archivos"""
     pass
 
 class S3UploadError(AppError):
+    """Error al subir archivos a S3"""
     pass
 
 class DiskSpaceError(AppError):
+    """Error por espacio insuficiente en disco"""
     pass
 
 class S3Manager:
+    """Gestor centralizado para operaciones S3"""
+    
     def __init__(self):
         self.endpoint = os.environ.get('S3_ENDPOINT')
         self.key = os.environ.get('S3_KEY')
         self.secret = os.environ.get('S3_SECRET')
         self.bucket = os.environ.get('S3_BUCKET_NAME', 'taller-computo')
         self.is_configured = bool(self.endpoint and self.key and self.secret)
-        self._client = None
         
         log_info(f"S3 Configurado: {self.is_configured}")
         if self.is_configured:
             log_info(f"Bucket: {self.bucket}")
     
     def get_client(self):
+        """Obtener cliente S3 configurado"""
         if not self.is_configured:
             raise S3UploadError("S3 no está configurado")
         
-        if not self._client:
-            self._client = boto3.client('s3',
-                                      endpoint_url=self.endpoint,
-                                      aws_access_key_id=self.key,
-                                      aws_secret_access_key=self.secret,
-                                      region_name='us-west-1')
-        return self._client
+        return boto3.client('s3',
+                          endpoint_url=self.endpoint,
+                          aws_access_key_id=self.key,
+                          aws_secret_access_key=self.secret,
+                          region_name='us-west-1')
     
     def upload_file(self, file_stream, key, content_type='application/octet-stream'):
+        """Subir archivo a S3"""
         try:
             client = self.get_client()
             file_stream.seek(0)
@@ -115,6 +112,7 @@ class S3Manager:
             raise S3UploadError(f"Error al subir a S3: {str(e)}")
     
     def download_file(self, key):
+        """Descargar archivo desde S3"""
         try:
             client = self.get_client()
             s3_object = client.get_object(Bucket=self.bucket, Key=key)
@@ -128,6 +126,7 @@ class S3Manager:
             raise S3UploadError(f"Error al descargar de S3: {str(e)}")
     
     def delete_file(self, key):
+        """Eliminar archivo de S3"""
         try:
             client = self.get_client()
             client.delete_object(Bucket=self.bucket, Key=key)
@@ -137,14 +136,39 @@ class S3Manager:
             raise S3UploadError(f"Error al eliminar de S3: {str(e)}")
 
 class FileValidator:
+    """Validador de archivos centralizado"""
+    
     def __init__(self):
         self.max_size = MAX_FILE_SIZE
         self.allowed_extensions = set().union(*ALLOWED_EXTENSIONS.values())
+        
+        # Mapeo de MIME types a extensiones permitidas
+        self.mime_to_ext = {
+            'image/png': ['png'],
+            'image/jpeg': ['jpg', 'jpeg'],
+            'image/gif': ['gif'],
+            'image/webp': ['webp'],
+            'image/bmp': ['bmp'],
+            'application/pdf': ['pdf'],
+            'application/msword': ['doc'],
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx'],
+            'application/vnd.ms-excel': ['xls'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['xlsx'],
+            'application/vnd.ms-powerpoint': ['ppt'],
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['pptx'],
+            'text/plain': ['txt'],
+            'application/zip': ['zip'],
+            'application/x-rar-compressed': ['rar'],
+            'application/x-7z-compressed': ['7z'],
+        }
     
     def validate(self, file_stream, filename):
+        """Validación exhaustiva de archivos"""
+        # Verificar nombre del archivo
         if '..' in filename or '/' in filename or '\\' in filename:
             raise FileValidationError("Nombre de archivo inválido")
         
+        # Verificar tamaño primero (más rápido)
         file_stream.seek(0, 2)
         size = file_stream.tell()
         file_stream.seek(0)
@@ -152,12 +176,47 @@ class FileValidator:
         if size > self.max_size:
             raise FileValidationError(f"Archivo demasiado grande (máx {self.max_size/1024/1024}MB)")
         
-        ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-        if not ext:
-            raise FileValidationError("Archivo sin extensión")
+        # Verificar MIME type (magic number)
+        try:
+            file_content = file_stream.read(2048)
+            file_stream.seek(0)
+            
+            mime = magic.from_buffer(file_content, mime=True)
+            
+            if mime not in self.mime_to_ext:
+                raise FileValidationError(f"Tipo de archivo {mime} no permitido")
+            
+            # Verificar extensión
+            ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+            if not ext:
+                raise FileValidationError("Archivo sin extensión")
+            
+            # Verificar que extensión coincida con MIME real
+            expected_exts = self.mime_to_ext.get(mime, [])
+            if ext not in expected_exts and not (mime == 'image/jpeg' and ext in ['jpg', 'jpeg']):
+                raise FileValidationError(f"Extensión .{ext} no coincide con tipo real {mime}")
+            
+            # Verificar contra extensiones permitidas
+            if ext not in self.allowed_extensions:
+                raise FileValidationError(f"Extensión .{ext} no permitida")
+                    
+        except Exception as e:
+            log_warning(f"Magic number validation skipped: {str(e)}")
+            # Si falla la validación MIME, al menos validar extensión
+            ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+            if ext not in self.allowed_extensions:
+                raise FileValidationError(f"Extensión .{ext} no permitida")
         
-        if ext not in self.allowed_extensions:
-            raise FileValidationError(f"Extensión .{ext} no permitida")
+        # Validar contenido para archivos de texto
+        if ext in ['txt', 'pdf', 'doc', 'docx']:
+            try:
+                sample = file_stream.read(1024)
+                file_stream.seek(0)
+                
+                if b'\x00' in sample and ext == 'txt':
+                    raise FileValidationError("Archivo de texto contiene caracteres binarios")
+            except:
+                pass
         
         return True
 
@@ -165,7 +224,10 @@ class FileValidator:
 s3_manager = S3Manager()
 file_validator = FileValidator()
 
-# --- RATE LIMITING ---
+# --- RATE LIMITING SIMPLE ---
+from collections import defaultdict
+import time
+
 class RateLimiter:
     def __init__(self, max_requests=10, window_seconds=60):
         self.max_requests = max_requests
@@ -176,116 +238,65 @@ class RateLimiter:
         now = time.time()
         window_start = now - self.window_seconds
         
+        # Limpiar solicitudes antiguas
         self.requests[key] = [timestamp for timestamp in self.requests[key] if timestamp > window_start]
         
+        # Verificar límite
         if len(self.requests[key]) >= self.max_requests:
             return False
         
+        # Registrar nueva solicitud
         self.requests[key].append(now)
         return True
 
+# Rate limiter para chat (10 mensajes por minuto)
 chat_limiter = RateLimiter(max_requests=10, window_seconds=60)
-auth_limiter = RateLimiter(max_requests=5, window_seconds=60)
-global_limiter = RateLimiter(max_requests=100, window_seconds=60)
 
-# --- CACHE SIMPLE ---
-class SimpleCache:
-    def __init__(self, default_timeout=300):
-        self.cache = {}
-        self.timestamps = {}
-        self.default_timeout = default_timeout
-    
-    def get(self, key):
-        if key in self.cache:
-            if time.time() - self.timestamps[key] < self.default_timeout:
-                return self.cache[key]
-            else:
-                del self.cache[key]
-                del self.timestamps[key]
-        return None
-    
-    def set(self, key, value, timeout=None):
-        self.cache[key] = value
-        self.timestamps[key] = time.time()
-        if timeout:
-            self.default_timeout = timeout
-    
-    def clear(self):
-        self.cache.clear()
-        self.timestamps.clear()
-
-cache = SimpleCache(default_timeout=300)
-
-# --- DECORADORES OPTIMIZADOS ---
+# --- DECORADORES DE SEGURIDAD OPTIMIZADOS ---
 
 def require_role(role):
+    """Decorador genérico para control de acceso por rol"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            ip = request.remote_addr
-            if not auth_limiter.is_allowed(f"auth_{ip}"):
-                flash('Demasiados intentos. Por favor espera.', 'danger')
-                return redirect(url_for('index'))
-            
             if session.get('tipo_usuario') != role:
                 flash(f'Acceso restringido a {role}s', 'danger')
-                return redirect(url_for('login' if role == 'profesor' else 'login_alumnos'))
+                return redirect(url_for(f'login{"_alumnos" if role == "alumno" else ""}'))
             
+            if role == 'profesor' and 'user' not in session:
+                flash('Acceso restringido a profesores', 'danger')
+                return redirect(url_for('login'))
+            
+            if role == 'alumno' and 'alumno_id' not in session:
+                flash('Debes iniciar sesión como alumno', 'danger')
+                return redirect(url_for('login_alumnos'))
+                
             return f(*args, **kwargs)
         return decorated_function
     return decorator
 
+# Alias para mantener compatibilidad
 require_profesor = require_role('profesor')
 require_alumno = require_role('alumno')
 
 def require_any_auth(f):
+    """Decorador para rutas que requieren cualquier tipo de autenticación"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'tipo_usuario' not in session:
             flash('Debes iniciar sesión para acceder a esta página', 'danger')
-            return redirect(url_for('login' if request.path.startswith('/admin') else 'login_alumnos'))
+            redirect_to = 'login' if request.path.startswith('/admin') else 'login_alumnos'
+            return redirect(url_for(redirect_to))
         return f(*args, **kwargs)
     return decorated_function
 
-def cache_view(timeout=300):
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            cache_key = f"{request.path}_{session.get('tipo_usuario','')}_{session.get('alumno_grado','')}"
-            cached = cache.get(cache_key)
-            if cached is not None:
-                return cached
-            
-            response = f(*args, **kwargs)
-            cache.set(cache_key, response, timeout=timeout)
-            return response
-        return decorated_function
-    return decorator
-
-# --- MIDDLEWARE ---
-
 @app.before_request
-def security_checks():
-    ip = request.remote_addr
-    if not global_limiter.is_allowed(f"global_{ip}"):
-        return jsonify({'error': 'Demasiadas solicitudes'}), 429
-    
-    if request.method == 'POST' and request.content_length:
-        if request.content_length > MAX_FILE_SIZE:
-            return jsonify({'error': 'Contenido demasiado grande'}), 413
-    
+def make_session_permanent():
+    """Marca la sesión como permanente en cada petición"""
     session.permanent = True
-    if session.get('_fresh', False):
-        session.modified = True
+    session.modified = True
 
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    return response
-
-# --- CONFIGURACIÓN DE BASE DE DATOS OPTIMIZADA ---
+# --- CONFIGURACIÓN DE BASE DE DATOS ---
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///escuela.db')
 
 if DATABASE_URL.startswith("postgres://"):
@@ -293,28 +304,39 @@ if DATABASE_URL.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,
-    'pool_recycle': 280,
-    'pool_size': 20,
-    'max_overflow': 40,
-    'pool_timeout': 30,
-    'connect_args': {
-        'connect_timeout': 10,
-        'keepalives': 1,
-        'keepalives_idle': 30,
-        'keepalives_interval': 10,
-        'keepalives_count': 5,
+
+# Configuración optimizada para Render
+if DATABASE_URL.startswith("postgresql://"):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 280,
+        'pool_size': 3,
+        'max_overflow': 5,
+        'pool_timeout': 30,
+        'connect_args': {
+            'connect_timeout': 10,
+            'keepalives': 1,
+            'keepalives_idle': 30,
+            'keepalives_interval': 10,
+            'keepalives_count': 5,
+        }
     }
-}
+else:
+    # Para desarrollo local con SQLite
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+        'pool_size': 10,
+        'max_overflow': 20
+    }
 
 db = SQLAlchemy(app)
 
-# Carpeta local de respaldo
+# Carpeta local de respaldo si no hay S3
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# --- MODELOS DE LA BASE DE DATOS ---
+# --- MODELOS DE LA BASE DE DATOS (MANTENIDOS POR COMPLETITUD) ---
 
 class Equipo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -477,6 +499,7 @@ class Pago(db.Model):
     fecha_vencimiento = db.Column(db.Date, nullable=True)
     grado_grupo = db.Column(db.String(20))
     creado_por = db.Column(db.String(100))
+    # CORRECCIÓN 1: Agregado cascade='all, delete-orphan'
     recibos = db.relationship('ReciboPago', backref='pago', lazy=True, cascade='all, delete-orphan')
 
 class ReciboPago(db.Model):
@@ -491,82 +514,84 @@ class ReciboPago(db.Model):
     recibido_por = db.Column(db.String(100))
     observaciones = db.Column(db.Text)
 
+# --- NUEVOS MODELOS PARA SISTEMA DE ARCHIVOS ---
+
 class SolicitudArchivo(db.Model):
+    """Solicitudes de archivos que los alumnos hacen al profesor"""
     __tablename__ = 'solicitudes_archivo'
     
     id = db.Column(db.Integer, primary_key=True)
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
-    tipo_documento = db.Column(db.String(100), nullable=False)
-    mensaje = db.Column(db.Text, nullable=False)
-    estado = db.Column(db.String(20), default='pendiente')
+    tipo_documento = db.Column(db.String(100), nullable=False)  # Ej: "Boleta", "Avance Escolar"
+    mensaje = db.Column(db.Text, nullable=False)  # Ej: "Solicito boleta del primer bimestre"
+    estado = db.Column(db.String(20), default='pendiente')  # pendiente, atendida, rechazada
     fecha_solicitud = db.Column(db.DateTime, default=datetime.now)
     fecha_respuesta = db.Column(db.DateTime, nullable=True)
     
+    # Relación con alumno
     alumno = db.relationship('UsuarioAlumno', backref='solicitudes_archivos')
 
+
 class ArchivoEnviado(db.Model):
+    """Archivos PDF que el profesor envía a los alumnos"""
     __tablename__ = 'archivos_enviados'
     
     id = db.Column(db.Integer, primary_key=True)
     alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
-    solicitud_id = db.Column(db.Integer, db.ForeignKey('solicitudes_archivo.id'), nullable=True)
+    solicitud_id = db.Column(db.Integer, db.ForeignKey('solicitudes_archivo.id'), nullable=True)  # Puede ser NULL si se envía sin solicitud
     
-    titulo = db.Column(db.String(200), nullable=False)
-    mensaje = db.Column(db.Text, nullable=True)
+    titulo = db.Column(db.String(200), nullable=False)  # Ej: "Boleta de Calificaciones - Primer Bimestre"
+    mensaje = db.Column(db.Text, nullable=True)  # Mensaje del profesor
     
-    archivo_url = db.Column(db.String(500), nullable=False)
+    # Información del archivo
+    archivo_url = db.Column(db.String(500), nullable=False)  # Ruta S3 o local
     nombre_archivo = db.Column(db.String(200), nullable=False)
     
+    # Estado
     leido = db.Column(db.Boolean, default=False)
     fecha_envio = db.Column(db.DateTime, default=datetime.now)
     fecha_lectura = db.Column(db.DateTime, nullable=True)
     
+    # Quien lo envió
     enviado_por = db.Column(db.String(100), nullable=False)
     
+    # Relaciones
     alumno = db.relationship('UsuarioAlumno', backref='archivos_recibidos')
     solicitud = db.relationship('SolicitudArchivo', backref='archivo_respuesta', uselist=False)
 
 # --- FUNCIONES AUXILIARES OPTIMIZADAS ---
 
 def get_current_user():
+    """Retorna (tipo_usuario, id, datos) o None"""
     if 'tipo_usuario' not in session:
         return None
     
-    cache_key = f"user_{session.get('tipo_usuario')}_{session.get('user', session.get('alumno_id', ''))}"
-    cached = cache.get(cache_key)
-    if cached:
-        return cached
-    
     if session['tipo_usuario'] == 'profesor':
-        result = ('profesor', session.get('user'), {'username': session.get('user')})
+        return ('profesor', session.get('user'), {'username': session.get('user')})
     elif session['tipo_usuario'] == 'alumno':
-        alumno_id = session.get('alumno_id')
-        alumno = UsuarioAlumno.query.get(alumno_id) if alumno_id else None
-        if alumno:
-            result = ('alumno', alumno_id, {
-                'id': alumno_id,
-                'nombre': alumno.nombre_completo,
-                'grado': alumno.grado_grupo,
-                'username': alumno.username
-            })
-        else:
-            result = None
-    
-    if result:
-        cache.set(cache_key, result, timeout=60)
-    return result
+        return ('alumno', session.get('alumno_id'), {
+            'id': session.get('alumno_id'),
+            'nombre': session.get('alumno_nombre'),
+            'grado': session.get('alumno_grado'),
+            'username': session.get('alumno_username')
+        })
+    return None
 
 def column_exists(table_name, column_name):
+    """Verifica si una columna existe en una tabla"""
+    from sqlalchemy import inspect
     inspector = inspect(db.engine)
     columns = inspector.get_columns(table_name)
     return any(col['name'] == column_name for col in columns)
 
 def migrar_bd():
+    """Ejecutar todas las migraciones necesarias"""
     migraciones = [
         ('usuario_alumno', 'foto_perfil', 'VARCHAR(300)'),
         ('entrega_alumno', 'titulo_tarea', 'VARCHAR(200)')
     ]
     
+    # Validar nombres de tabla y columnas para prevenir SQL injection
     allowed_tables = {'usuario_alumno', 'entrega_alumno'}
     allowed_columns = {'foto_perfil', 'titulo_tarea'}
     
@@ -578,12 +603,15 @@ def migrar_bd():
         if not column_exists(tabla, columna):
             log_info(f"Agregando columna '{columna}' a '{tabla}'...")
             try:
+                # Usar SQLAlchemy Core en lugar de SQL crudo
+                from sqlalchemy import text
                 with db.engine.connect() as conn:
                     conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}"))
                     conn.commit()
             except Exception as e:
                 log_error(f"Error al agregar columna {columna} a {tabla}: {str(e)}")
     
+    # Agregar columnas para el sistema de archivos si no existen
     if not column_exists('solicitudes_archivo', 'id'):
         log_info("Creando tabla solicitudes_archivo...")
         db.create_all()
@@ -595,7 +623,9 @@ def migrar_bd():
     migrar_bd_pagos()
 
 def migrar_bd_pagos():
+    """Migración para crear tablas de pagos si no existen"""
     try:
+        from sqlalchemy import inspect
         inspector = inspect(db.engine)
         tablas_existentes = inspector.get_table_names()
         
@@ -609,18 +639,20 @@ def migrar_bd_pagos():
         log_error(f"Error en migración de pagos: {str(e)}")
 
 def check_disk_space(min_free_gb=1):
+    """Verifica que haya espacio suficiente en disco"""
     try:
         import shutil
         stat = shutil.disk_usage(UPLOAD_FOLDER)
-        free_gb = stat.free / (1024**3)
+        free_gb = stat.free / (1024**3)  # Convertir a GB
         if free_gb < min_free_gb:
             raise DiskSpaceError(f"Espacio insuficiente en disco. Solo {free_gb:.2f}GB disponibles (mínimo {min_free_gb}GB requerido)")
         return True
     except Exception as e:
         log_warning(f"No se pudo verificar espacio en disco: {str(e)}")
-        return True
+        return True  # Continuar si no se puede verificar
 
 def generar_recibo_pdf(recibo, alumno, pago):
+    """Genera un recibo de pago en PDF con formato profesional"""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
     elementos = []
@@ -734,6 +766,7 @@ def generar_recibo_pdf(recibo, alumno, pago):
     return buffer
 
 def guardar_archivo(archivo):
+    """Guarda archivo en S3 o localmente con verificación de espacio"""
     filename = secure_filename(archivo.filename)
     
     log_info(f"Intentando guardar archivo: {filename}")
@@ -750,10 +783,12 @@ def guardar_archivo(archivo):
                 return (s3_key, True)
             except S3UploadError as e:
                 log_warning(f"Error S3: {e}. Verificando espacio en disco...")
+                # Verificar espacio en disco antes de guardar localmente
                 if not check_disk_space():
                     raise DiskSpaceError("No hay espacio suficiente en disco para guardar el archivo localmente")
                 flash('Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
         
+        # Verificar espacio en disco para almacenamiento local
         if not check_disk_space():
             raise DiskSpaceError("No hay espacio suficiente en disco")
         
@@ -769,6 +804,7 @@ def guardar_archivo(archivo):
         raise AppError(f"Error al guardar archivo: {str(e)}")
 
 def descargar_archivo(archivo_url, nombre_archivo, carpeta_local):
+    """Función helper para descargar archivos desde S3 o local"""
     if archivo_url and (archivo_url.startswith('http') or 'uploads/' in archivo_url):
         if s3_manager.is_configured:
             file_stream, content_type = s3_manager.download_file(archivo_url)
@@ -779,6 +815,7 @@ def descargar_archivo(archivo_url, nombre_archivo, carpeta_local):
                               nombre_archivo, as_attachment=True)
 
 def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
+    """Genera un PDF con el reporte de asistencia optimizado para N+1"""
     try:
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
@@ -812,6 +849,10 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         
         fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date() if isinstance(fecha_inicio, str) else fecha_inicio
         
+        # Query optimizado para evitar N+1
+        from sqlalchemy import func, case
+        
+        # CORRECCIÓN 2: Cambiar case([(condición, valor)]) por case((condición, valor))
         alumnos_con_stats = db.session.query(
             UsuarioAlumno.id,
             UsuarioAlumno.nombre_completo,
@@ -912,6 +953,7 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
             total_registros=total_registros
         )
         
+        # Usar commit() en lugar de with db.session.begin()
         db.session.add(nuevo_reporte)
         db.session.commit()
         
@@ -923,6 +965,7 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         raise AppError(f"Error al generar reporte: {str(e)}")
 
 def generar_pdf_boleta(alumno, datos_evaluacion, observaciones, promedio, periodo):
+    """Genera PDF de boleta y guarda en S3"""
     try:
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -1039,7 +1082,6 @@ def disk_space_error(error):
 # --- RUTAS PRINCIPALES ---
 
 @app.route('/')
-@cache_view(timeout=300)
 def index():
     anuncios = Anuncio.query.order_by(Anuncio.fecha.desc()).limit(5).all()
     horarios = Horario.query.all()
@@ -1072,7 +1114,6 @@ def login():
                 session.permanent = True
                 session['user'] = username
                 session['tipo_usuario'] = 'profesor'
-                session['_fresh'] = True
                 flash('¡Bienvenido, Profesor!', 'success')
                 return redirect(url_for('admin_dashboard'))
             else:
@@ -1084,7 +1125,6 @@ def login():
 
 @app.route('/logout')
 def logout():
-    cache.clear()
     session.clear()
     flash('Sesión cerrada correctamente.')
     return redirect(url_for('index'))
@@ -1133,7 +1173,6 @@ def login_alumnos():
             session['alumno_grado'] = alumno.grado_grupo
             session['alumno_username'] = alumno.username
             session['tipo_usuario'] = 'alumno'
-            session['_fresh'] = True
             
             flash(f'¡Bienvenido {alumno.nombre_completo}!', 'success')
             return redirect(url_for('panel_alumnos'))
@@ -1145,7 +1184,6 @@ def login_alumnos():
 
 @app.route('/alumnos/logout')
 def logout_alumnos():
-    cache.clear()
     session.clear()
     return redirect(url_for('index'))
 
@@ -1172,7 +1210,6 @@ def actualizar_foto_perfil():
         alumno = UsuarioAlumno.query.get(session['alumno_id'])
         alumno.foto_perfil = ruta_foto
         db.session.commit()
-        cache.clear()
         
         flash('¡Foto de perfil actualizada correctamente! 🎉', 'success')
         
@@ -1185,7 +1222,6 @@ def actualizar_foto_perfil():
 
 @app.route('/admin')
 @require_profesor
-@cache_view(timeout=60)
 def admin_dashboard():
     equipos = Equipo.query.count()
     pendientes = Mantenimiento.query.filter_by(fecha_reparacion=None).count()
@@ -1220,12 +1256,12 @@ def toggle_chat():
         flash('Chat activado. Los alumnos pueden conversar.', 'success')
     
     db.session.commit()
-    cache.clear()
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/api/chat/enviar', methods=['POST'])
 @require_alumno
 def enviar_mensaje():
+    # Rate limiting
     alumno_key = f"alumno_{session['alumno_id']}"
     if not chat_limiter.is_allowed(alumno_key):
         return {'status': 'error', 'msg': 'Demasiados mensajes. Espera un momento.'}, 429
@@ -1247,7 +1283,6 @@ def enviar_mensaje():
     
     db.session.add(nuevo)
     db.session.commit()
-    cache.clear()
     
     return {'status': 'ok'}
 
@@ -1322,7 +1357,6 @@ def agregar_alumno():
     
     db.session.add(nuevo_alumno)
     db.session.commit()
-    cache.clear()
     
     flash(f'Alumno {nombre_completo} inscrito en {grado_grupo}.', 'success')
     return redirect(url_for('gestionar_alumnos'))
@@ -1341,7 +1375,6 @@ def editar_alumno(id):
         alumno.password_hash = generate_password_hash(nueva_password)
     
     db.session.commit()
-    cache.clear()
     
     flash(f'Datos de {alumno.nombre_completo} actualizados.', 'success')
     return redirect(url_for('gestionar_alumnos'))
@@ -1354,7 +1387,6 @@ def eliminar_alumno(id):
     
     db.session.delete(alumno)
     db.session.commit()
-    cache.clear()
     
     flash(f'Alumno {nombre} eliminado del sistema.', 'warning')
     return redirect(url_for('gestionar_alumnos'))
@@ -1379,7 +1411,6 @@ def tomar_asistencia():
                 db.session.add(nuevo)
     
     db.session.commit()
-    cache.clear()
     flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
     return redirect(url_for('gestionar_alumnos', grado=request.form.get('grado_origen')))
 
@@ -1446,7 +1477,6 @@ def calificar_entrega(id):
     entrega.comentarios = request.form['comentarios']
     
     db.session.commit()
-    cache.clear()
     
     flash(f'Entrega de {entrega.nombre_alumno} calificada con {entrega.estrellas} estrellas.', 'success')
     return redirect(url_for('ver_entregas_alumnos'))
@@ -1521,7 +1551,6 @@ def eliminar_reporte(reporte_id):
         
         db.session.delete(reporte)
         db.session.commit()
-        cache.clear()
         
         flash('Reporte eliminado correctamente', 'success')
         
@@ -1535,7 +1564,6 @@ def eliminar_reporte(reporte_id):
 
 @app.route('/alumnos')
 @require_alumno
-@cache_view(timeout=60)
 def panel_alumnos():
     alumno = UsuarioAlumno.query.get(session['alumno_id'])
     
@@ -1589,7 +1617,6 @@ def subir_tarea():
         
         db.session.add(nueva_entrega)
         db.session.commit()
-        cache.clear()
         
         flash('¡Tarea enviada con éxito! El profesor la revisará pronto.', 'success')
     except (FileValidationError, AppError, DiskSpaceError) as e:
@@ -1601,7 +1628,6 @@ def subir_tarea():
 
 @app.route('/admin/inventario')
 @require_profesor
-@cache_view(timeout=120)
 def inventario():
     equipos = Equipo.query.order_by(Equipo.id.desc()).all()
     return render_template('admin/inventario.html', equipos=equipos)
@@ -1619,7 +1645,6 @@ def agregar_equipo():
     
     db.session.add(nuevo_equipo)
     db.session.commit()
-    cache.clear()
     
     flash('Equipo agregado correctamente', 'success')
     return redirect(url_for('inventario'))
@@ -1631,7 +1656,6 @@ def eliminar_equipo(id):
     
     db.session.delete(equipo)
     db.session.commit()
-    cache.clear()
     
     flash('Equipo eliminado del inventario', 'warning')
     return redirect(url_for('inventario'))
@@ -1677,7 +1701,6 @@ def reportar_falla():
     
     db.session.add(nuevo_reporte)
     db.session.commit()
-    cache.clear()
     
     flash('Falla reportada. El equipo pasó a estado de reparación.', 'warning')
     return redirect(url_for('mantenimiento'))
@@ -1694,7 +1717,6 @@ def solucionar_falla():
     reporte.equipo.estado = "Funcional"
     
     db.session.commit()
-    cache.clear()
     flash('¡Equipo reparado exitosamente!', 'success')
     return redirect(url_for('mantenimiento'))
 
@@ -1716,7 +1738,6 @@ def publicar_anuncio():
     
     db.session.add(nuevo_anuncio)
     db.session.commit()
-    cache.clear()
     
     flash('¡Anuncio publicado en la página principal!', 'success')
     return redirect(url_for('gestionar_anuncios'))
@@ -1728,7 +1749,6 @@ def eliminar_anuncio(id):
     
     db.session.delete(anuncio)
     db.session.commit()
-    cache.clear()
     
     flash('Anuncio eliminado.', 'secondary')
     return redirect(url_for('gestionar_anuncios'))
@@ -1756,7 +1776,6 @@ def publicar_cuestionario():
     
     db.session.add(nuevo)
     db.session.commit()
-    cache.clear()
     
     flash(f'Cuestionario asignado exclusivamente al grupo {target}.', 'success')
     return redirect(url_for('gestionar_cuestionarios'))
@@ -1768,7 +1787,6 @@ def eliminar_cuestionario(id):
     
     db.session.delete(item)
     db.session.commit()
-    cache.clear()
     
     flash('Cuestionario eliminado.', 'secondary')
     return redirect(url_for('gestionar_cuestionarios'))
@@ -1791,7 +1809,6 @@ def agregar_al_banco():
     
     db.session.add(nuevo)
     db.session.commit()
-    cache.clear()
     
     flash('Cuestionario guardado en la bodega.', 'success')
     return redirect(url_for('gestionar_banco'))
@@ -1803,7 +1820,6 @@ def eliminar_del_banco(id):
     
     db.session.delete(item)
     db.session.commit()
-    cache.clear()
     
     flash('Plantilla eliminada.', 'warning')
     return redirect(url_for('gestionar_banco'))
@@ -1827,7 +1843,6 @@ def asignar_desde_banco():
         
         db.session.add(nuevo_activo)
         db.session.commit()
-        cache.clear()
         
         flash(f'¡Examen "{original.titulo}" liberado para el grupo {target}!', 'success')
     else:
@@ -1838,7 +1853,6 @@ def asignar_desde_banco():
 # --- RUTAS PÚBLICAS DE GRADOS ---
 
 @app.route('/grado/<int:numero_grado>')
-@cache_view(timeout=300)
 def ver_grado(numero_grado):
     actividad = ActividadGrado.query.filter_by(grado=numero_grado).first()
     return render_template('publico/ver_grado.html', grado=numero_grado, actividad=actividad)
@@ -1864,7 +1878,6 @@ def gestionar_grados():
             db.session.add(actividad)
         
         db.session.commit()
-        cache.clear()
         flash(f'¡Información de {grado_id}° actualizada!', 'success')
         return redirect(url_for('gestionar_grados'))
 
@@ -1892,7 +1905,6 @@ def agregar_horario():
     
     db.session.add(nuevo)
     db.session.commit()
-    cache.clear()
     
     flash('Horario agregado correctamente.', 'success')
     return redirect(url_for('gestionar_horarios'))
@@ -1904,7 +1916,6 @@ def eliminar_horario(id):
     
     db.session.delete(horario)
     db.session.commit()
-    cache.clear()
     
     flash('Horario eliminado.', 'warning')
     return redirect(url_for('gestionar_horarios'))
@@ -1928,7 +1939,6 @@ def agregar_plataforma():
     
     db.session.add(nueva)
     db.session.commit()
-    cache.clear()
     
     flash('Plataforma agregada.', 'success')
     return redirect(url_for('gestionar_plataformas'))
@@ -1940,7 +1950,6 @@ def eliminar_plataforma(id):
     
     db.session.delete(p)
     db.session.commit()
-    cache.clear()
     
     flash('Plataforma eliminada.', 'warning')
     return redirect(url_for('gestionar_plataformas'))
@@ -1997,7 +2006,6 @@ def subir_recurso():
             
             db.session.add(nuevo)
             db.session.commit()
-            cache.clear()
             
             flash('Recurso publicado correctamente.', 'success')
         except (FileValidationError, AppError, DiskSpaceError) as e:
@@ -2012,7 +2020,6 @@ def eliminar_recurso(id):
     
     db.session.delete(recurso)
     db.session.commit()
-    cache.clear()
     
     flash('Recurso eliminado de la lista.', 'warning')
     return redirect(url_for('gestionar_recursos'))
@@ -2082,7 +2089,6 @@ def configurar_boletas():
         
         db.session.add(nuevo)
         db.session.commit()
-        cache.clear()
         
         flash('Criterio agregado correctamente.', 'success')
     
@@ -2096,7 +2102,6 @@ def borrar_criterio(id):
     
     db.session.delete(c)
     db.session.commit()
-    cache.clear()
     
     return redirect(url_for('configurar_boletas'))
 
@@ -2159,7 +2164,6 @@ def generar_boleta():
             
             db.session.add(nueva_boleta)
             db.session.commit()
-            cache.clear()
             
             flash('✅ Boleta generada y guardada correctamente', 'success')
             
@@ -2233,7 +2237,6 @@ def eliminar_boleta_guardada(boleta_id):
         
         db.session.delete(boleta)
         db.session.commit()
-        cache.clear()
         
         flash('Boleta eliminada correctamente', 'success')
         
@@ -2283,7 +2286,6 @@ def crear_mensaje_flotante():
     
     db.session.add(nuevo_mensaje)
     db.session.commit()
-    cache.clear()
     
     flash(f'¡Mensaje enviado al grupo {grado_grupo}!', 'success')
     return redirect(url_for('gestionar_mensajes_flotantes'))
@@ -2294,7 +2296,6 @@ def desactivar_mensaje_flotante(id):
     mensaje = MensajeFlotante.query.get_or_404(id)
     mensaje.activo = False
     db.session.commit()
-    cache.clear()
     
     flash('Mensaje desactivado correctamente', 'success')
     return redirect(url_for('gestionar_mensajes_flotantes'))
@@ -2333,7 +2334,6 @@ def marcar_mensaje_leido(mensaje_id):
         
         db.session.add(nuevo_leido)
         db.session.commit()
-        cache.clear()
     
     return jsonify({'status': 'ok'})
 
@@ -2412,7 +2412,6 @@ def crear_pago():
                 pagos_creados += 1
             
             db.session.commit()
-            cache.clear()
             flash(f'✅ {pagos_creados} pago(s) creado(s) correctamente', 'success')
             return redirect(url_for('gestionar_pagos'))
             
@@ -2490,7 +2489,6 @@ def registrar_pago(pago_id):
             pago.estado = 'parcial'
         
         db.session.commit()
-        cache.clear()
         
         flash(f'✅ Pago registrado correctamente. Recibo: {numero_recibo}', 'success')
         
@@ -2559,7 +2557,8 @@ def eliminar_pago(pago_id):
     pago = Pago.query.get_or_404(pago_id)
     
     try:
-        recibos_a_eliminar = list(pago.recibos)
+        # Primero eliminar archivos de S3
+        recibos_a_eliminar = list(pago.recibos)  # Crear lista para evitar problemas con la relación
         
         for recibo in recibos_a_eliminar:
             if recibo.archivo_url and s3_manager.is_configured:
@@ -2569,13 +2568,15 @@ def eliminar_pago(pago_id):
                 except S3UploadError as e:
                     log_warning(f"No se pudo eliminar recibo de S3: {e}")
             
+            # Eliminar el recibo ANTES de eliminar el pago
             db.session.delete(recibo)
         
+        # Hacer flush para aplicar las eliminaciones de recibos
         db.session.flush()
         
+        # Ahora eliminar el pago
         db.session.delete(pago)
         db.session.commit()
-        cache.clear()
         
         flash('Pago y recibos eliminados correctamente', 'success')
     except Exception as e:
@@ -2590,6 +2591,7 @@ def eliminar_pago(pago_id):
 @app.route('/alumno/solicitar-archivo', methods=['GET', 'POST'])
 @require_alumno
 def solicitar_archivo():
+    """Permite al alumno solicitar un archivo al profesor"""
     alumno_id = session.get('alumno_id')
     
     if request.method == 'POST':
@@ -2600,6 +2602,7 @@ def solicitar_archivo():
             flash('Debe completar todos los campos', 'danger')
             return redirect(url_for('solicitar_archivo'))
         
+        # Crear la solicitud
         nueva_solicitud = SolicitudArchivo(
             alumno_id=alumno_id,
             tipo_documento=tipo_documento,
@@ -2609,29 +2612,35 @@ def solicitar_archivo():
         
         db.session.add(nueva_solicitud)
         db.session.commit()
-        cache.clear()
         
         flash('✅ Solicitud enviada correctamente. El profesor la revisará pronto.', 'success')
-        return redirect(url_for('panel_alumnos'))
+        return redirect(url_for('panel_alumnos'))  # CAMBIO 2: Redirigir a panel_alumnos
     
+    # GET - Mostrar formulario y historial
     alumno = UsuarioAlumno.query.get(alumno_id)
     solicitudes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id).order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
     
+    # CAMBIO 1: Contar solicitudes pendientes antes del render_template
     pendientes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id, estado='pendiente').count()
     
+    # CAMBIO 3: Agregar pendientes al render_template
     return render_template('alumnos/solicitar_archivo.html', 
                          alumno=alumno,
                          solicitudes=solicitudes,
                          pendientes=pendientes)
 
+
 @app.route('/alumno/mis-archivos')
 @require_alumno
 def ver_mis_archivos():
+    """Ver todos los archivos que el profesor ha enviado al alumno"""
     alumno_id = session.get('alumno_id')
     alumno = UsuarioAlumno.query.get(alumno_id)
     
+    # Obtener archivos ordenados por fecha
     archivos = ArchivoEnviado.query.filter_by(alumno_id=alumno_id).order_by(ArchivoEnviado.fecha_envio.desc()).all()
     
+    # Contar archivos no leídos
     no_leidos = ArchivoEnviado.query.filter_by(alumno_id=alumno_id, leido=False).count()
     
     return render_template('alumnos/mis_archivos.html',
@@ -2639,23 +2648,27 @@ def ver_mis_archivos():
                          archivos=archivos,
                          no_leidos=no_leidos)
 
+
 @app.route('/alumno/archivo/<int:archivo_id>/descargar')
 @require_alumno
 def descargar_archivo_alumno(archivo_id):
+    """Descargar un archivo enviado por el profesor"""
     alumno_id = session.get('alumno_id')
     archivo = ArchivoEnviado.query.get_or_404(archivo_id)
     
+    # Verificar que el archivo pertenece al alumno
     if archivo.alumno_id != alumno_id:
         flash('No tienes permiso para descargar este archivo', 'danger')
         return redirect(url_for('ver_mis_archivos'))
     
+    # Marcar como leído
     if not archivo.leido:
         archivo.leido = True
         archivo.fecha_lectura = datetime.now()
         db.session.commit()
-        cache.clear()
     
     try:
+        # Descargar desde S3 o local
         if archivo.archivo_url and s3_manager.is_configured:
             file_stream, content_type = s3_manager.download_file(archivo.archivo_url)
             return send_file(
@@ -2665,6 +2678,7 @@ def descargar_archivo_alumno(archivo_id):
                 download_name=archivo.nombre_archivo
             )
         else:
+            # Archivo local
             return send_from_directory(
                 os.path.join(UPLOAD_FOLDER, 'archivos_enviados'),
                 archivo.nombre_archivo,
@@ -2675,9 +2689,11 @@ def descargar_archivo_alumno(archivo_id):
         flash(f'Error al descargar archivo: {str(e)}', 'danger')
         return redirect(url_for('ver_mis_archivos'))
 
+
 @app.route('/admin/solicitudes-archivo')
 @require_profesor
 def ver_solicitudes_archivo():
+    """Ver todas las solicitudes de archivos de los alumnos"""
     filtro_estado = request.args.get('estado', 'todas')
     
     query = SolicitudArchivo.query.join(UsuarioAlumno)
@@ -2687,6 +2703,7 @@ def ver_solicitudes_archivo():
     
     solicitudes = query.order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
     
+    # Contar solicitudes pendientes
     pendientes = SolicitudArchivo.query.filter_by(estado='pendiente').count()
     
     return render_template('admin/solicitudes_archivo.html',
@@ -2694,9 +2711,11 @@ def ver_solicitudes_archivo():
                          filtro_estado=filtro_estado,
                          pendientes=pendientes)
 
+
 @app.route('/admin/solicitudes-archivo/<int:solicitud_id>/responder', methods=['GET', 'POST'])
 @require_profesor
 def responder_solicitud_archivo(solicitud_id):
+    """Responder a una solicitud enviando un archivo"""
     solicitud = SolicitudArchivo.query.get_or_404(solicitud_id)
     
     if request.method == 'POST':
@@ -2707,24 +2726,29 @@ def responder_solicitud_archivo(solicitud_id):
             flash('Debe seleccionar un archivo PDF', 'danger')
             return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
         
+        # Validar que sea PDF
         if not archivo.filename.lower().endswith('.pdf'):
             flash('Solo se permiten archivos PDF', 'danger')
             return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
         
         try:
+            # Validar archivo
             file_stream = BytesIO(archivo.read())
             validator = FileValidator()
             validator.validate(file_stream, archivo.filename)
             
+            # Guardar archivo
             nombre_archivo = secure_filename(archivo.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             nombre_archivo = f"{timestamp}_{nombre_archivo}"
             
+            # Subir a S3 o guardar localmente
             if s3_manager.is_configured:
                 key_s3 = f"archivos_enviados/{solicitud.alumno.grado_grupo}/{nombre_archivo}"
                 archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
                 archivo_url = key_s3
             else:
+                # Guardar localmente
                 ruta_local = os.path.join(UPLOAD_FOLDER, 'archivos_enviados')
                 os.makedirs(ruta_local, exist_ok=True)
                 archivo_path = os.path.join(ruta_local, nombre_archivo)
@@ -2733,6 +2757,7 @@ def responder_solicitud_archivo(solicitud_id):
                     f.write(file_stream.read())
                 archivo_url = f"archivos_enviados/{nombre_archivo}"
             
+            # Crear registro de archivo enviado
             archivo_enviado = ArchivoEnviado(
                 alumno_id=solicitud.alumno_id,
                 solicitud_id=solicitud.id,
@@ -2745,11 +2770,11 @@ def responder_solicitud_archivo(solicitud_id):
             
             db.session.add(archivo_enviado)
             
+            # Actualizar estado de la solicitud
             solicitud.estado = 'atendida'
             solicitud.fecha_respuesta = datetime.now()
             
             db.session.commit()
-            cache.clear()
             
             flash(f'✅ Archivo enviado correctamente a {solicitud.alumno.nombre_completo}', 'success')
             return redirect(url_for('ver_solicitudes_archivo'))
@@ -2762,9 +2787,12 @@ def responder_solicitud_archivo(solicitud_id):
     
     return render_template('admin/responder_solicitud.html', solicitud=solicitud)
 
+
 @app.route('/admin/enviar-archivo-directo', methods=['GET', 'POST'])
 @require_profesor
 def enviar_archivo_directo():
+    """Enviar archivo a un alumno sin que lo haya solicitado"""
+    
     if request.method == 'POST':
         alumno_id = request.form.get('alumno_id')
         titulo = request.form.get('titulo')
@@ -2775,6 +2803,7 @@ def enviar_archivo_directo():
             flash('Debe completar todos los campos obligatorios', 'danger')
             return redirect(url_for('enviar_archivo_directo'))
         
+        # Validar que sea PDF
         if not archivo.filename.lower().endswith('.pdf'):
             flash('Solo se permiten archivos PDF', 'danger')
             return redirect(url_for('enviar_archivo_directo'))
@@ -2785,19 +2814,23 @@ def enviar_archivo_directo():
                 flash('Alumno no encontrado', 'danger')
                 return redirect(url_for('enviar_archivo_directo'))
             
+            # Validar archivo
             file_stream = BytesIO(archivo.read())
             validator = FileValidator()
             validator.validate(file_stream, archivo.filename)
             
+            # Guardar archivo
             nombre_archivo = secure_filename(archivo.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             nombre_archivo = f"{timestamp}_{nombre_archivo}"
             
+            # Subir a S3 o guardar localmente
             if s3_manager.is_configured:
                 key_s3 = f"archivos_enviados/{alumno.grado_grupo}/{nombre_archivo}"
                 archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
                 archivo_url = key_s3
             else:
+                # Guardar localmente
                 ruta_local = os.path.join(UPLOAD_FOLDER, 'archivos_enviados')
                 os.makedirs(ruta_local, exist_ok=True)
                 archivo_path = os.path.join(ruta_local, nombre_archivo)
@@ -2806,9 +2839,10 @@ def enviar_archivo_directo():
                     f.write(file_stream.read())
                 archivo_url = f"archivos_enviados/{nombre_archivo}"
             
+            # Crear registro de archivo enviado (sin solicitud)
             archivo_enviado = ArchivoEnviado(
                 alumno_id=alumno_id,
-                solicitud_id=None,
+                solicitud_id=None,  # No hay solicitud
                 titulo=titulo,
                 mensaje=mensaje,
                 archivo_url=archivo_url,
@@ -2818,7 +2852,6 @@ def enviar_archivo_directo():
             
             db.session.add(archivo_enviado)
             db.session.commit()
-            cache.clear()
             
             flash(f'✅ Archivo enviado correctamente a {alumno.nombre_completo}', 'success')
             return redirect(url_for('enviar_archivo_directo'))
@@ -2829,12 +2862,15 @@ def enviar_archivo_directo():
             flash(f'Error al enviar archivo: {str(e)}', 'danger')
             return redirect(url_for('enviar_archivo_directo'))
     
+    # GET - Mostrar formulario
     alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
     return render_template('admin/enviar_archivo_directo.html', alumnos=alumnos)
+
 
 @app.route('/admin/archivos-enviados')
 @require_profesor
 def ver_archivos_enviados():
+    """Ver historial de todos los archivos enviados"""
     filtro_alumno = request.args.get('alumno', 'todos')
     
     query = ArchivoEnviado.query.join(UsuarioAlumno)
@@ -2855,13 +2891,16 @@ def ver_archivos_enviados():
 @app.route('/api/archivos-nuevos/cantidad')
 @require_alumno
 def cantidad_archivos_nuevos():
+    """API para obtener la cantidad de archivos no leídos del alumno"""
     alumno_id = session.get('alumno_id')
     cantidad = ArchivoEnviado.query.filter_by(alumno_id=alumno_id, leido=False).count()
     return jsonify({'cantidad': cantidad})
 
+
 @app.route('/api/solicitudes-pendientes/cantidad')
 @require_profesor
 def cantidad_solicitudes_pendientes():
+    """API para obtener la cantidad de solicitudes pendientes"""
     cantidad = SolicitudArchivo.query.filter_by(estado='pendiente').count()
     return jsonify({'cantidad': cantidad})
 
@@ -2872,5 +2911,4 @@ with app.app_context():
     migrar_bd()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(debug=True, port=5000)

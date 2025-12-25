@@ -338,7 +338,7 @@ db = SQLAlchemy(app)
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# --- MODELOS DE LA BASE DE DATOS (MANTENIDOS POR COMPLETITUD) ---
+# --- MODELOS DE LA BASE DE DATOS ---
 
 class Equipo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -373,13 +373,11 @@ class UsuarioAlumno(db.Model):
     activo = db.Column(db.Boolean, default=True)
     foto_perfil = db.Column(db.String(300), nullable=True, default=None)
     
-    # RELACIONES CON CASCADE PARA ELIMINACIÓN - CORREGIDAS
-    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True, cascade='all, delete-orphan')
-    asistencias = db.relationship('Asistencia', backref='alumno', lazy=True, cascade='all, delete-orphan')
-    boletas = db.relationship('BoletaGenerada', backref='alumno', lazy=True, cascade='all, delete-orphan')
-    pagos = db.relationship('Pago', backref='alumno', lazy=True, cascade='all, delete-orphan')
-    solicitudes_archivos = db.relationship('SolicitudArchivo', backref='alumno', lazy=True, cascade='all, delete-orphan')
-    archivos_recibidos = db.relationship('ArchivoEnviado', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    # RELACIONES CON back_populates (CORREGIDO - sin duplicados)
+    entregas = db.relationship('EntregaAlumno', back_populates='alumno', cascade='all, delete-orphan')
+    asistencias = db.relationship('Asistencia', back_populates='alumno', cascade='all, delete-orphan')
+    boletas = db.relationship('BoletaGenerada', back_populates='alumno', cascade='all, delete-orphan')
+    pagos = db.relationship('Pago', back_populates='alumno', cascade='all, delete-orphan')
 
 class EntregaAlumno(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -391,12 +389,18 @@ class EntregaAlumno(db.Model):
     estrellas = db.Column(db.Integer, default=0)
     comentarios = db.Column(db.Text)
     fecha_entrega = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relación con alumno usando back_populates
+    alumno = db.relationship('UsuarioAlumno', back_populates='entregas')
 
 class Asistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)  # ← CORREGIDO: ondelete='CASCADE'
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
     fecha = db.Column(db.Date, default=datetime.utcnow)
     estado = db.Column(db.String(10))
+    
+    # Relación con alumno usando back_populates
+    alumno = db.relationship('UsuarioAlumno', back_populates='asistencias')
 
 class ReporteAsistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -491,6 +495,9 @@ class BoletaGenerada(db.Model):
     promedio = db.Column(db.Float)
     observaciones = db.Column(db.Text)
     generado_por = db.Column(db.String(100))
+    
+    # Relación con alumno usando back_populates
+    alumno = db.relationship('UsuarioAlumno', back_populates='boletas')
 
 class Pago(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -506,6 +513,9 @@ class Pago(db.Model):
     grado_grupo = db.Column(db.String(20))
     creado_por = db.Column(db.String(100))
     recibos = db.relationship('ReciboPago', backref='pago', lazy=True, cascade='all, delete-orphan')
+    
+    # Relación con alumno usando back_populates
+    alumno = db.relationship('UsuarioAlumno', back_populates='pagos')
 
 class ReciboPago(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -533,7 +543,7 @@ class SolicitudArchivo(db.Model):
     fecha_solicitud = db.Column(db.DateTime, default=datetime.now)
     fecha_respuesta = db.Column(db.DateTime, nullable=True)
     
-    # Relación con alumno
+    # Relación con alumno usando backref (se mantiene aquí)
     alumno = db.relationship('UsuarioAlumno', backref='solicitudes_archivos')
 
 class ArchivoEnviado(db.Model):
@@ -556,7 +566,7 @@ class ArchivoEnviado(db.Model):
     
     enviado_por = db.Column(db.String(100), nullable=False)
     
-    # Relaciones
+    # Relaciones usando backref (se mantienen aquí)
     alumno = db.relationship('UsuarioAlumno', backref='archivos_recibidos')
     solicitud = db.relationship('SolicitudArchivo', backref='archivo_respuesta', uselist=False)
 
@@ -2483,6 +2493,13 @@ def registrar_pago(pago_id):
                     f.write(buffer_pdf.getvalue())
                 nuevo_recibo.archivo_url = f"pagos/recibos/{nombre_archivo}"
                 nuevo_recibo.nombre_archivo = nombre_archivo
+        else:
+            ruta_local = os.path.join(UPLOAD_FOLDER, 'pagos', 'recibos')
+            os.makedirs(ruta_local, exist_ok=True)
+            with open(os.path.join(ruta_local, nombre_archivo), 'wb') as f:
+                f.write(buffer_pdf.getvalue())
+            nuevo_recibo.archivo_url = f"pagos/recibos/{nombre_archivo}"
+            nuevo_recibo.nombre_archivo = nombre_archivo
         
         pago.monto_pagado += monto_pagado
         pago.monto_pendiente -= monto_pagado

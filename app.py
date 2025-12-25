@@ -305,7 +305,7 @@ if DATABASE_URL.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Configuración optimizada para Render
+# Configuración optimizada para Render - CORREGIDA CON SSL
 if DATABASE_URL.startswith("postgresql://"):
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_pre_ping': True,
@@ -319,6 +319,8 @@ if DATABASE_URL.startswith("postgresql://"):
             'keepalives_idle': 30,
             'keepalives_interval': 10,
             'keepalives_count': 5,
+            'sslmode': 'require',  # ← AGREGADO: Requerir SSL
+            'options': '-c statement_timeout=30000'  # ← AGREGADO: Timeout de consultas
         }
     }
 else:
@@ -370,10 +372,14 @@ class UsuarioAlumno(db.Model):
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
     activo = db.Column(db.Boolean, default=True)
     foto_perfil = db.Column(db.String(300), nullable=True, default=None)
-    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True)
-    asistencias = db.relationship('Asistencia', backref='alumno', lazy=True)
-    boletas = db.relationship('BoletaGenerada', backref='alumno', lazy=True)
-    pagos = db.relationship('Pago', backref='alumno', lazy=True)
+    
+    # RELACIONES CON CASCADE PARA ELIMINACIÓN - CORREGIDAS
+    entregas = db.relationship('EntregaAlumno', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    asistencias = db.relationship('Asistencia', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    boletas = db.relationship('BoletaGenerada', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    pagos = db.relationship('Pago', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    solicitudes_archivos = db.relationship('SolicitudArchivo', backref='alumno', lazy=True, cascade='all, delete-orphan')
+    archivos_recibidos = db.relationship('ArchivoEnviado', backref='alumno', lazy=True, cascade='all, delete-orphan')
 
 class EntregaAlumno(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -388,7 +394,7 @@ class EntregaAlumno(db.Model):
 
 class Asistencia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)  # ← CORREGIDO: ondelete='CASCADE'
     fecha = db.Column(db.Date, default=datetime.utcnow)
     estado = db.Column(db.String(10))
 
@@ -439,7 +445,7 @@ class Plataforma(db.Model):
 
 class Mensaje(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'))
     nombre_alumno = db.Column(db.String(100))
     grado_grupo = db.Column(db.String(20))
     contenido = db.Column(db.Text)
@@ -456,7 +462,7 @@ class MensajeFlotante(db.Model):
 class MensajeLeido(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     mensaje_id = db.Column(db.Integer, db.ForeignKey('mensaje_flotante.id'))
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'))
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'))
     fecha_lectura = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Configuracion(db.Model):
@@ -477,7 +483,7 @@ class CriterioBoleta(db.Model):
 
 class BoletaGenerada(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
     archivo_url = db.Column(db.String(500))
     nombre_archivo = db.Column(db.String(200))
     fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
@@ -488,7 +494,7 @@ class BoletaGenerada(db.Model):
 
 class Pago(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
     concepto = db.Column(db.String(200), nullable=False)
     monto_total = db.Column(db.Float, nullable=False)
     monto_pagado = db.Column(db.Float, default=0)
@@ -499,12 +505,11 @@ class Pago(db.Model):
     fecha_vencimiento = db.Column(db.Date, nullable=True)
     grado_grupo = db.Column(db.String(20))
     creado_por = db.Column(db.String(100))
-    # CORRECCIÓN 1: Agregado cascade='all, delete-orphan'
     recibos = db.relationship('ReciboPago', backref='pago', lazy=True, cascade='all, delete-orphan')
 
 class ReciboPago(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    pago_id = db.Column(db.Integer, db.ForeignKey('pago.id'), nullable=False)
+    pago_id = db.Column(db.Integer, db.ForeignKey('pago.id', ondelete='CASCADE'), nullable=False)
     numero_recibo = db.Column(db.String(50), unique=True, nullable=False)
     monto = db.Column(db.Float, nullable=False)
     metodo_pago = db.Column(db.String(50))
@@ -521,38 +526,34 @@ class SolicitudArchivo(db.Model):
     __tablename__ = 'solicitudes_archivo'
     
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
-    tipo_documento = db.Column(db.String(100), nullable=False)  # Ej: "Boleta", "Avance Escolar"
-    mensaje = db.Column(db.Text, nullable=False)  # Ej: "Solicito boleta del primer bimestre"
-    estado = db.Column(db.String(20), default='pendiente')  # pendiente, atendida, rechazada
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    tipo_documento = db.Column(db.String(100), nullable=False)
+    mensaje = db.Column(db.Text, nullable=False)
+    estado = db.Column(db.String(20), default='pendiente')
     fecha_solicitud = db.Column(db.DateTime, default=datetime.now)
     fecha_respuesta = db.Column(db.DateTime, nullable=True)
     
     # Relación con alumno
     alumno = db.relationship('UsuarioAlumno', backref='solicitudes_archivos')
 
-
 class ArchivoEnviado(db.Model):
     """Archivos PDF que el profesor envía a los alumnos"""
     __tablename__ = 'archivos_enviados'
     
     id = db.Column(db.Integer, primary_key=True)
-    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id'), nullable=False)
-    solicitud_id = db.Column(db.Integer, db.ForeignKey('solicitudes_archivo.id'), nullable=True)  # Puede ser NULL si se envía sin solicitud
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    solicitud_id = db.Column(db.Integer, db.ForeignKey('solicitudes_archivo.id', ondelete='SET NULL'), nullable=True)
     
-    titulo = db.Column(db.String(200), nullable=False)  # Ej: "Boleta de Calificaciones - Primer Bimestre"
-    mensaje = db.Column(db.Text, nullable=True)  # Mensaje del profesor
+    titulo = db.Column(db.String(200), nullable=False)
+    mensaje = db.Column(db.Text, nullable=True)
     
-    # Información del archivo
-    archivo_url = db.Column(db.String(500), nullable=False)  # Ruta S3 o local
+    archivo_url = db.Column(db.String(500), nullable=False)
     nombre_archivo = db.Column(db.String(200), nullable=False)
     
-    # Estado
     leido = db.Column(db.Boolean, default=False)
     fecha_envio = db.Column(db.DateTime, default=datetime.now)
     fecha_lectura = db.Column(db.DateTime, nullable=True)
     
-    # Quien lo envió
     enviado_por = db.Column(db.String(100), nullable=False)
     
     # Relaciones
@@ -591,7 +592,6 @@ def migrar_bd():
         ('entrega_alumno', 'titulo_tarea', 'VARCHAR(200)')
     ]
     
-    # Validar nombres de tabla y columnas para prevenir SQL injection
     allowed_tables = {'usuario_alumno', 'entrega_alumno'}
     allowed_columns = {'foto_perfil', 'titulo_tarea'}
     
@@ -603,7 +603,6 @@ def migrar_bd():
         if not column_exists(tabla, columna):
             log_info(f"Agregando columna '{columna}' a '{tabla}'...")
             try:
-                # Usar SQLAlchemy Core en lugar de SQL crudo
                 from sqlalchemy import text
                 with db.engine.connect() as conn:
                     conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}"))
@@ -611,7 +610,6 @@ def migrar_bd():
             except Exception as e:
                 log_error(f"Error al agregar columna {columna} a {tabla}: {str(e)}")
     
-    # Agregar columnas para el sistema de archivos si no existen
     if not column_exists('solicitudes_archivo', 'id'):
         log_info("Creando tabla solicitudes_archivo...")
         db.create_all()
@@ -643,13 +641,13 @@ def check_disk_space(min_free_gb=1):
     try:
         import shutil
         stat = shutil.disk_usage(UPLOAD_FOLDER)
-        free_gb = stat.free / (1024**3)  # Convertir a GB
+        free_gb = stat.free / (1024**3)
         if free_gb < min_free_gb:
             raise DiskSpaceError(f"Espacio insuficiente en disco. Solo {free_gb:.2f}GB disponibles (mínimo {min_free_gb}GB requerido)")
         return True
     except Exception as e:
         log_warning(f"No se pudo verificar espacio en disco: {str(e)}")
-        return True  # Continuar si no se puede verificar
+        return True
 
 def generar_recibo_pdf(recibo, alumno, pago):
     """Genera un recibo de pago en PDF con formato profesional"""
@@ -783,12 +781,10 @@ def guardar_archivo(archivo):
                 return (s3_key, True)
             except S3UploadError as e:
                 log_warning(f"Error S3: {e}. Verificando espacio en disco...")
-                # Verificar espacio en disco antes de guardar localmente
                 if not check_disk_space():
                     raise DiskSpaceError("No hay espacio suficiente en disco para guardar el archivo localmente")
                 flash('Advertencia: No se pudo subir a la nube. Guardado localmente.', 'warning')
         
-        # Verificar espacio en disco para almacenamiento local
         if not check_disk_space():
             raise DiskSpaceError("No hay espacio suficiente en disco")
         
@@ -849,10 +845,9 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
         
         fecha_inicio_obj = datetime.strptime(fecha_inicio, '%Y-%m-%d').date() if isinstance(fecha_inicio, str) else fecha_inicio
         
-        # Query optimizado para evitar N+1
         from sqlalchemy import func, case
         
-        # CORRECCIÓN 2: Cambiar case([(condición, valor)]) por case((condición, valor))
+        # CORRECCIÓN: Cambiar case([(condición, valor)]) por case((condición, valor))
         alumnos_con_stats = db.session.query(
             UsuarioAlumno.id,
             UsuarioAlumno.nombre_completo,
@@ -953,7 +948,6 @@ def generar_pdf_asistencia(grupo, fecha_inicio, fecha_fin=None):
             total_registros=total_registros
         )
         
-        # Usar commit() en lugar de with db.session.begin()
         db.session.add(nuevo_reporte)
         db.session.commit()
         
@@ -1261,7 +1255,6 @@ def toggle_chat():
 @app.route('/api/chat/enviar', methods=['POST'])
 @require_alumno
 def enviar_mensaje():
-    # Rate limiting
     alumno_key = f"alumno_{session['alumno_id']}"
     if not chat_limiter.is_allowed(alumno_key):
         return {'status': 'error', 'msg': 'Demasiados mensajes. Espera un momento.'}, 429
@@ -1534,7 +1527,18 @@ def ver_reportes_asistencia():
 @require_profesor
 def descargar_reporte_guardado(reporte_id):
     reporte = ReporteAsistencia.query.get_or_404(reporte_id)
-    return descargar_archivo(reporte.archivo_url, reporte.nombre_archivo, 'reportes')
+    
+    # AGREGAR VALIDACIÓN: Verificar si el archivo existe
+    if not reporte.archivo_url:
+        flash('El archivo de este reporte no está disponible', 'danger')
+        return redirect(url_for('ver_reportes_asistencia'))
+    
+    try:
+        return descargar_archivo(reporte.archivo_url, reporte.nombre_archivo, 'reportes')
+    except Exception as e:
+        log_error(f"Error al descargar reporte: {str(e)}")
+        flash(f'Error: El archivo no existe o fue eliminado', 'danger')
+        return redirect(url_for('ver_reportes_asistencia'))
 
 @app.route('/admin/eliminar-reporte/<int:reporte_id>')
 @require_profesor
@@ -2558,7 +2562,7 @@ def eliminar_pago(pago_id):
     
     try:
         # Primero eliminar archivos de S3
-        recibos_a_eliminar = list(pago.recibos)  # Crear lista para evitar problemas con la relación
+        recibos_a_eliminar = list(pago.recibos)
         
         for recibo in recibos_a_eliminar:
             if recibo.archivo_url and s3_manager.is_configured:
@@ -2568,13 +2572,10 @@ def eliminar_pago(pago_id):
                 except S3UploadError as e:
                     log_warning(f"No se pudo eliminar recibo de S3: {e}")
             
-            # Eliminar el recibo ANTES de eliminar el pago
             db.session.delete(recibo)
         
-        # Hacer flush para aplicar las eliminaciones de recibos
         db.session.flush()
         
-        # Ahora eliminar el pago
         db.session.delete(pago)
         db.session.commit()
         
@@ -2602,7 +2603,6 @@ def solicitar_archivo():
             flash('Debe completar todos los campos', 'danger')
             return redirect(url_for('solicitar_archivo'))
         
-        # Crear la solicitud
         nueva_solicitud = SolicitudArchivo(
             alumno_id=alumno_id,
             tipo_documento=tipo_documento,
@@ -2614,21 +2614,17 @@ def solicitar_archivo():
         db.session.commit()
         
         flash('✅ Solicitud enviada correctamente. El profesor la revisará pronto.', 'success')
-        return redirect(url_for('panel_alumnos'))  # CAMBIO 2: Redirigir a panel_alumnos
+        return redirect(url_for('panel_alumnos'))
     
-    # GET - Mostrar formulario y historial
     alumno = UsuarioAlumno.query.get(alumno_id)
     solicitudes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id).order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
     
-    # CAMBIO 1: Contar solicitudes pendientes antes del render_template
     pendientes = SolicitudArchivo.query.filter_by(alumno_id=alumno_id, estado='pendiente').count()
     
-    # CAMBIO 3: Agregar pendientes al render_template
     return render_template('alumnos/solicitar_archivo.html', 
                          alumno=alumno,
                          solicitudes=solicitudes,
                          pendientes=pendientes)
-
 
 @app.route('/alumno/mis-archivos')
 @require_alumno
@@ -2637,17 +2633,14 @@ def ver_mis_archivos():
     alumno_id = session.get('alumno_id')
     alumno = UsuarioAlumno.query.get(alumno_id)
     
-    # Obtener archivos ordenados por fecha
     archivos = ArchivoEnviado.query.filter_by(alumno_id=alumno_id).order_by(ArchivoEnviado.fecha_envio.desc()).all()
     
-    # Contar archivos no leídos
     no_leidos = ArchivoEnviado.query.filter_by(alumno_id=alumno_id, leido=False).count()
     
     return render_template('alumnos/mis_archivos.html',
                          alumno=alumno,
                          archivos=archivos,
                          no_leidos=no_leidos)
-
 
 @app.route('/alumno/archivo/<int:archivo_id>/descargar')
 @require_alumno
@@ -2656,19 +2649,16 @@ def descargar_archivo_alumno(archivo_id):
     alumno_id = session.get('alumno_id')
     archivo = ArchivoEnviado.query.get_or_404(archivo_id)
     
-    # Verificar que el archivo pertenece al alumno
     if archivo.alumno_id != alumno_id:
         flash('No tienes permiso para descargar este archivo', 'danger')
         return redirect(url_for('ver_mis_archivos'))
     
-    # Marcar como leído
     if not archivo.leido:
         archivo.leido = True
         archivo.fecha_lectura = datetime.now()
         db.session.commit()
     
     try:
-        # Descargar desde S3 o local
         if archivo.archivo_url and s3_manager.is_configured:
             file_stream, content_type = s3_manager.download_file(archivo.archivo_url)
             return send_file(
@@ -2678,7 +2668,6 @@ def descargar_archivo_alumno(archivo_id):
                 download_name=archivo.nombre_archivo
             )
         else:
-            # Archivo local
             return send_from_directory(
                 os.path.join(UPLOAD_FOLDER, 'archivos_enviados'),
                 archivo.nombre_archivo,
@@ -2688,7 +2677,6 @@ def descargar_archivo_alumno(archivo_id):
         log_error(f"Error al descargar archivo: {str(e)}")
         flash(f'Error al descargar archivo: {str(e)}', 'danger')
         return redirect(url_for('ver_mis_archivos'))
-
 
 @app.route('/admin/solicitudes-archivo')
 @require_profesor
@@ -2703,14 +2691,12 @@ def ver_solicitudes_archivo():
     
     solicitudes = query.order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
     
-    # Contar solicitudes pendientes
     pendientes = SolicitudArchivo.query.filter_by(estado='pendiente').count()
     
     return render_template('admin/solicitudes_archivo.html',
                          solicitudes=solicitudes,
                          filtro_estado=filtro_estado,
                          pendientes=pendientes)
-
 
 @app.route('/admin/solicitudes-archivo/<int:solicitud_id>/responder', methods=['GET', 'POST'])
 @require_profesor
@@ -2726,29 +2712,24 @@ def responder_solicitud_archivo(solicitud_id):
             flash('Debe seleccionar un archivo PDF', 'danger')
             return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
         
-        # Validar que sea PDF
         if not archivo.filename.lower().endswith('.pdf'):
             flash('Solo se permiten archivos PDF', 'danger')
             return redirect(url_for('responder_solicitud_archivo', solicitud_id=solicitud_id))
         
         try:
-            # Validar archivo
             file_stream = BytesIO(archivo.read())
             validator = FileValidator()
             validator.validate(file_stream, archivo.filename)
             
-            # Guardar archivo
             nombre_archivo = secure_filename(archivo.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             nombre_archivo = f"{timestamp}_{nombre_archivo}"
             
-            # Subir a S3 o guardar localmente
             if s3_manager.is_configured:
                 key_s3 = f"archivos_enviados/{solicitud.alumno.grado_grupo}/{nombre_archivo}"
                 archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
                 archivo_url = key_s3
             else:
-                # Guardar localmente
                 ruta_local = os.path.join(UPLOAD_FOLDER, 'archivos_enviados')
                 os.makedirs(ruta_local, exist_ok=True)
                 archivo_path = os.path.join(ruta_local, nombre_archivo)
@@ -2757,7 +2738,6 @@ def responder_solicitud_archivo(solicitud_id):
                     f.write(file_stream.read())
                 archivo_url = f"archivos_enviados/{nombre_archivo}"
             
-            # Crear registro de archivo enviado
             archivo_enviado = ArchivoEnviado(
                 alumno_id=solicitud.alumno_id,
                 solicitud_id=solicitud.id,
@@ -2770,7 +2750,6 @@ def responder_solicitud_archivo(solicitud_id):
             
             db.session.add(archivo_enviado)
             
-            # Actualizar estado de la solicitud
             solicitud.estado = 'atendida'
             solicitud.fecha_respuesta = datetime.now()
             
@@ -2787,7 +2766,6 @@ def responder_solicitud_archivo(solicitud_id):
     
     return render_template('admin/responder_solicitud.html', solicitud=solicitud)
 
-
 @app.route('/admin/enviar-archivo-directo', methods=['GET', 'POST'])
 @require_profesor
 def enviar_archivo_directo():
@@ -2803,7 +2781,6 @@ def enviar_archivo_directo():
             flash('Debe completar todos los campos obligatorios', 'danger')
             return redirect(url_for('enviar_archivo_directo'))
         
-        # Validar que sea PDF
         if not archivo.filename.lower().endswith('.pdf'):
             flash('Solo se permiten archivos PDF', 'danger')
             return redirect(url_for('enviar_archivo_directo'))
@@ -2814,23 +2791,19 @@ def enviar_archivo_directo():
                 flash('Alumno no encontrado', 'danger')
                 return redirect(url_for('enviar_archivo_directo'))
             
-            # Validar archivo
             file_stream = BytesIO(archivo.read())
             validator = FileValidator()
             validator.validate(file_stream, archivo.filename)
             
-            # Guardar archivo
             nombre_archivo = secure_filename(archivo.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             nombre_archivo = f"{timestamp}_{nombre_archivo}"
             
-            # Subir a S3 o guardar localmente
             if s3_manager.is_configured:
                 key_s3 = f"archivos_enviados/{alumno.grado_grupo}/{nombre_archivo}"
                 archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
                 archivo_url = key_s3
             else:
-                # Guardar localmente
                 ruta_local = os.path.join(UPLOAD_FOLDER, 'archivos_enviados')
                 os.makedirs(ruta_local, exist_ok=True)
                 archivo_path = os.path.join(ruta_local, nombre_archivo)
@@ -2839,10 +2812,9 @@ def enviar_archivo_directo():
                     f.write(file_stream.read())
                 archivo_url = f"archivos_enviados/{nombre_archivo}"
             
-            # Crear registro de archivo enviado (sin solicitud)
             archivo_enviado = ArchivoEnviado(
                 alumno_id=alumno_id,
-                solicitud_id=None,  # No hay solicitud
+                solicitud_id=None,
                 titulo=titulo,
                 mensaje=mensaje,
                 archivo_url=archivo_url,
@@ -2862,10 +2834,8 @@ def enviar_archivo_directo():
             flash(f'Error al enviar archivo: {str(e)}', 'danger')
             return redirect(url_for('enviar_archivo_directo'))
     
-    # GET - Mostrar formulario
     alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
     return render_template('admin/enviar_archivo_directo.html', alumnos=alumnos)
-
 
 @app.route('/admin/archivos-enviados')
 @require_profesor
@@ -2895,7 +2865,6 @@ def cantidad_archivos_nuevos():
     alumno_id = session.get('alumno_id')
     cantidad = ArchivoEnviado.query.filter_by(alumno_id=alumno_id, leido=False).count()
     return jsonify({'cantidad': cantidad})
-
 
 @app.route('/api/solicitudes-pendientes/cantidad')
 @require_profesor

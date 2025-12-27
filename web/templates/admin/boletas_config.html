@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-md-4">
+            <div class="glass-card">
+                <h5 class="fw-bold mb-3">Nuevo Criterio</h5>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label>Grado</label>
+                        <select name="grado" class="form-select">
+                            {% for i in range(1,7) %}<option value="{{i}}">{{i}}°</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>Nombre del Rubro</label>
+                        <input type="text" name="criterio" class="form-control" placeholder="Ej. Tareas Entregadas" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Agregar</button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="col-md-8">
+            <div class="glass-card">
+                <h5 class="fw-bold">Criterios Activos</h5>
+                <table class="table">
+                    <thead><tr><th>Grado</th><th>Criterio</th><th>Acción</th></tr></thead>
+                    <tbody>
+                        {% for c in criterios %}
+                        <tr>
+                            <td><span class="badge bg-info text-dark">{{ c.grado }}°</span></td>
+                            <td>{{ c.nombre }}</td>
+                            <td>
+                                <!-- RUTA CORREGIDA: admin.borrar_criterio -->
+                                <a href="{{ url_for('admin.borrar_criterio', id=c.id) }}" class="text-danger">
+                                    <i class="fas fa-times"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

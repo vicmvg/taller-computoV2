@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Alumnos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #343a40;
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+        }
+        .status-active {
+            background-color: #d1e7dd;
+            color: #0f5132;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .status-inactive {
+            background-color: #f8d7da;
+            color: #842029;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .btn-group .btn-check:checked + .btn {
+            transform: scale(1.1);
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4">Panel del Profesor</h4>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.dashboard') }}">
+                                <i class="bi bi-speedometer2"></i> Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.inventario') }}">
+                                <i class="bi bi-pc-display"></i> Inventario
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.mantenimiento') }}">
+                                <i class="bi bi-tools"></i> Mantenimiento
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="{{ url_for('admin.gestionar_alumnos') }}">
+                                <i class="bi bi-people"></i> Alumnos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.ver_reportes_asistencia') }}">
+                                <i class="bi bi-file-earmark-pdf"></i> Reportes
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.ver_entregas_alumnos') }}">
+                                <i class="bi bi-folder-check"></i> Entregas
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.gestionar_anuncios') }}">
+                                <i class="bi bi-megaphone"></i> Anuncios
+                            </a>
+                        </li>
+                        <!-- 🆕 SISTEMA DE GESTIÓN DE ARCHIVOS -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.ver_solicitudes_archivo') }}">
+                                <i class="bi bi-file-earmark-text"></i> Solicitudes
+                                <span id="badge-solicitudes-pendientes"></span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.enviar_archivo_directo') }}">
+                                <i class="bi bi-send"></i> Enviar Archivo
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('admin.ver_archivos_enviados') }}">
+                                <i class="bi bi-archive"></i> Historial
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <!-- ✅ CORREGIDO: Cambiado de 'admin.logout' a 'alumno.logout' -->
+                            <a class="nav-link" href="{{ url_for('alumno.logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-people"></i> Gestión de Alumnos</h2>
+                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">
+                        <i class="bi bi-plus-circle"></i> Nuevo Alumno
+                    </button>
+                </div>
+                
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <!-- Stats Cards -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-white bg-primary">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ total_alumnos }}</h5>
+                                <p class="card-text">Total de Alumnos</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-white bg-success">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ alumnos_activos }}</h5>
+                                <p class="card-text">Alumnos Activos</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-white bg-warning">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ alumnos_inactivos }}</h5>
+                                <p class="card-text">Alumnos Inactivos</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-white bg-info">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ grupos|length }}</h5>
+                                <p class="card-text">Grupos Registrados</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Filter Buttons -->
+                <div class="mb-3">
+                    <div class="btn-group" role="group">
+                        <input type="radio" class="btn-check" name="filtroGrupo" id="btnTodos" 
+                               autocomplete="off" checked onchange="filtrarGrupo('Todos')">
+                        <label class="btn btn-outline-primary" for="btnTodos">
+                            <i class="bi bi-people-fill"></i> Todos
+                        </label>
+                        
+                        {% for grupo in grupos %}
+                        <input type="radio" class="btn-check" name="filtroGrupo" 
+                               id="btn{{ grupo }}" autocomplete="off" onchange="filtrarGrupo('{{ grupo }}')">
+                        <label class="btn btn-outline-primary" for="btn{{ grupo }}">{{ grupo }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <!-- Students Table -->
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('admin.tomar_asistencia') }}">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="alumnosTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Usuario</th>
+                                            <th>Nombre</th>
+                                            <th>Grado/Grupo</th>
+                                            <th>Contraseña</th>
+                                            <th>Estado</th>
+                                            <th>Asistencia</th>
+                                            <th>Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for alumno in alumnos %}
+                                        <tr data-grupo="{{ alumno.grado_grupo }}">
+                                            <td>{{ alumno.username }}</td>
+                                            <td>{{ alumno.nombre_completo }}</td>
+                                            <td>
+                                                <span class="badge bg-primary">{{ alumno.grado_grupo }}</span>
+                                            </td>
+                                            <td>
+                                                <div class="input-group input-group-sm" style="max-width: 200px;">
+                                                    <input type="password" class="form-control form-control-sm" 
+                                                           value="{{ alumno.password_original }}" 
+                                                           id="pwd{{ alumno.id }}" readonly>
+                                                    <button class="btn btn-outline-secondary btn-sm" type="button"
+                                                            onclick="togglePassword('pwd{{ alumno.id }}', this)">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                {% if alumno.activo %}
+                                                    <span class="status-active">
+                                                        <i class="bi bi-check-circle"></i> Activo
+                                                    </span>
+                                                {% else %}
+                                                    <span class="status-inactive">
+                                                        <i class="bi bi-x-circle"></i> Inactivo
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <input type="hidden" name="alumno_id[]" value="{{ alumno.id }}">
+                                                <select name="asistencia[]" class="form-select form-select-sm" 
+                                                        style="width: auto;">
+                                                    <option value="Presente" selected>✅ Presente</option>
+                                                    <option value="Falta">❌ Falta</option>
+                                                    <option value="Retardo">⚠️ Retardo</option>
+                                                    <option value="Justificado">📝 Justificado</option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button type="button" class="btn btn-outline-primary" 
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#editModal{{ alumno.id }}">
+                                                        <i class="bi bi-pencil"></i>
+                                                    </button>
+                                                    <a href="{{ url_for('admin.eliminar_alumno', id=alumno.id) }}" 
+                                                       class="btn btn-outline-danger"
+                                                       onclick="return confirm('¿Eliminar a {{ alumno.nombre_completo }}?')">
+                                                        <i class="bi bi-trash"></i>
+                                                    </a>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        
+                                        <!-- Edit Modal for each student -->
+                                        <div class="modal fade" id="editModal{{ alumno.id }}" tabindex="-1">
+                                            <div class="modal-dialog">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title">Editar Alumno</h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                    </div>
+                                                    <form method="POST" action="{{ url_for('admin.editar_alumno', id=alumno.id) }}">
+                                                        <div class="modal-body">
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Usuario</label>
+                                                                <input type="text" class="form-control" 
+                                                                       value="{{ alumno.username }}" disabled>
+                                                                <small class="form-text text-muted">El usuario no se puede cambiar</small>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Nombre Completo</label>
+                                                                <input type="text" class="form-control" name="nombre_completo"
+                                                                       value="{{ alumno.nombre_completo }}" required>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Grado/Grupo</label>
+                                                                <input type="text" class="form-control" name="grado_grupo"
+                                                                       value="{{ alumno.grado_grupo }}" required>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Nueva Contraseña</label>
+                                                                <input type="password" class="form-control" name="password"
+                                                                       placeholder="Dejar en blanco para no cambiar">
+                                                            </div>
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" 
+                                                                       name="activo" id="activo{{ alumno.id }}" 
+                                                                       {% if alumno.activo %}checked{% endif %}>
+                                                                <label class="form-check-label" for="activo{{ alumno.id }}">
+                                                                    Cuenta activa
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                            <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            {% if filtro_actual and filtro_actual != 'Todos' %}
+                            <div class="text-end mt-3">
+                                <a href="{{ url_for('admin.generar_reporte_asistencia', grupo=filtro_actual, fecha_inicio=fecha_hoy) }}" 
+                                   class="btn btn-info me-2" target="_blank">
+                                    <i class="fas fa-file-pdf me-2"></i>Generar Reporte PDF
+                                </a>
+                                <button type="submit" class="btn btn-success fw-bold">
+                                    <i class="fas fa-save me-2"></i>Guardar Asistencia
+                                </button>
+                            </div>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Student Modal -->
+    <div class="modal fade" id="addStudentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Crear Nuevo Alumno</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" action="{{ url_for('admin.agregar_alumno') }}">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Usuario Único</label>
+                            <input type="text" class="form-control" name="username" 
+                                   placeholder="Ej: 6AMatias2007" required>
+                            <small class="form-text text-muted">
+                                Este será su nombre de usuario para iniciar sesión. Debe ser único.
+                            </small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nombre Completo</label>
+                            <input type="text" class="form-control" name="nombre_completo" required>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label fw-bold small">Grado</label>
+                                <select class="form-select" name="grado" required>
+                                    {% for i in range(1, 7) %}
+                                    <option value="{{ i }}">{{ i }}°</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label fw-bold small">Grupo</label>
+                                <select class="form-select" name="grupo" required>
+                                    <option value="A">Grupo A</option>
+                                    <option value="B">Grupo B</option>
+                                    <option value="C">Grupo C</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Contraseña</label>
+                            <input type="password" class="form-control" name="password" required>
+                            <small class="form-text text-muted">
+                                Comparte esta contraseña con el alumno de manera segura.
+                            </small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Crear Alumno</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 🆕 SCRIPT PARA NOTIFICACIONES DE SOLICITUDES PENDIENTES -->
+    <script>
+        function actualizarBadgeSolicitudes() {
+            fetch('/api/solicitudes-pendientes/cantidad')
+                .then(response => response.json())
+                .then(data => {
+                    const badge = document.getElementById('badge-solicitudes-pendientes');
+                    if (data.cantidad > 0) {
+                        badge.innerHTML = `<span class="badge bg-warning text-dark rounded-pill ms-2">${data.cantidad}</span>`;
+                    } else {
+                        badge.innerHTML = '';
+                    }
+                })
+                .catch(error => console.error('Error al obtener solicitudes:', error));
+        }
+
+        // Llamar al cargar la página y cada 30 segundos
+        actualizarBadgeSolicitudes();
+        setInterval(actualizarBadgeSolicitudes, 30000);
+        
+        function togglePassword(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const icon = btn.querySelector('i');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('bi-eye');
+                icon.classList.add('bi-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('bi-eye-slash');
+                icon.classList.add('bi-eye');
+            }
+        }
+        
+        function filtrarGrupo(grupo) {
+            const rows = document.querySelectorAll('#alumnosTable tbody tr[data-grupo]');
+            
+            rows.forEach(row => {
+                if (grupo === 'Todos' || row.dataset.grupo === grupo) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

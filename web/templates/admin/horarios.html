@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="mb-4">
+        <h2 class="fw-bold" style="color: #1e293b;">Gestión de Horarios</h2>
+        <p class="text-muted">Configura los días y horas de atención para cada grupo.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="glass-card border-top border-4 border-info">
+                <h5 class="fw-bold mb-3 text-info"><i class="fas fa-clock me-2"></i>Nuevo Horario</h5>
+                
+                <!-- RUTA CORREGIDA: admin.agregar_horario -->
+                <form action="{{ url_for('admin.agregar_horario') }}" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Día de la Semana</label>
+                        <select class="form-select" name="dia" required>
+                            <option value="Lunes">Lunes</option>
+                            <option value="Martes">Martes</option>
+                            <option value="Miércoles">Miércoles</option>
+                            <option value="Jueves">Jueves</option>
+                            <option value="Viernes">Viernes</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Grados Asignados</label>
+                        <input type="text" class="form-control" name="grados" placeholder="Ej. 1° y 2° Primaria" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Hora de Atención</label>
+                        <input type="text" class="form-control" name="hora" placeholder="Ej. 08:00 - 10:00 AM" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-info w-100 fw-bold text-white">
+                        <i class="fas fa-plus-circle me-2"></i>Agregar a la Tabla
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="glass-card p-0 overflow-hidden">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4">Día</th>
+                            <th>Grados</th>
+                            <th>Hora</th>
+                            <th class="text-end pe-4">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for h in horarios %}
+                        <tr>
+                            <td class="ps-4 fw-bold text-primary">{{ h.dia }}</td>
+                            <td><span class="badge bg-secondary">{{ h.grados }}</span></td>
+                            <td>{{ h.hora }}</td>
+                            <td class="text-end pe-4">
+                                <!-- RUTA CORREGIDA: admin.eliminar_horario -->
+                                <a href="{{ url_for('admin.eliminar_horario', id=h.id) }}" class="btn btn-sm btn-outline-danger border-0">
+                                    <i class="fas fa-trash-alt"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center py-5 text-muted">
+                                <i class="far fa-calendar-times fa-3x mb-3 opacity-25"></i>
+                                <p>No hay horarios configurados.</p>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

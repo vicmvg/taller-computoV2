@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="glass-card border-top border-4 border-success">
+                <h5 class="fw-bold mb-3 text-success"><i class="fas fa-cloud-upload-alt me-2"></i>Subir Recurso</h5>
+                
+                <form action="{{ url_for('admin.subir_recurso') }}" method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Título del Documento</label>
+                        <input type="text" class="form-control" name="titulo" placeholder="Ej. Reglamento Escolar" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold small">Archivo (PDF, Word)</label>
+                        <input type="file" class="form-control" name="archivo" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100 fw-bold text-white">
+                        <i class="fas fa-plus-circle me-2"></i>Publicar
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="glass-card p-0 overflow-hidden">
+                <div class="p-3 border-bottom bg-light">
+                    <h6 class="mb-0 fw-bold">Biblioteca Actual</h6>
+                </div>
+                <table class="table table-hover mb-0 align-middle">
+                    <tbody>
+                        {% for r in recursos %}
+                        <tr>
+                            <td class="ps-4" style="width: 50px;">
+                                {% if r.tipo_archivo == 'PDF' %}
+                                    <i class="fas fa-file-pdf fa-2x text-danger"></i>
+                                {% elif r.tipo_archivo == 'WORD' %}
+                                    <i class="fas fa-file-word fa-2x text-primary"></i>
+                                {% else %}
+                                    <i class="fas fa-file-alt fa-2x text-secondary"></i>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="d-block fw-bold">{{ r.titulo }}</span>
+                                <small class="text-muted">{{ r.fecha.strftime('%d/%m/%Y') }}</small>
+                            </td>
+                            <td class="text-end pe-4">
+                                <!-- ACTUALIZADO: Usar nueva ruta ver_archivo -->
+                                <a href="{{ url_for('admin.ver_archivo', archivo_path=r.archivo_url) }}" 
+                                   target="_blank" class="btn btn-sm btn-light border me-1">
+                                    <i class="fas fa-eye"></i> Ver
+                                </a>
+                                
+                                <a href="{{ url_for('admin.eliminar_recurso', id=r.id) }}" 
+                                   class="btn btn-sm btn-outline-danger border-0" 
+                                   onclick="return confirm('¿Borrar este archivo?')">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="text-center py-5 text-muted">No has subido recursos todavía.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

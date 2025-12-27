@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel del Alumno</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0d6efd 0%, #0b5ed7 100%);
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            margin: 5px 0;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        .sidebar .nav-link i {
+            width: 20px;
+            margin-right: 10px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border: none;
+        }
+        .star-rating {
+            color: #ffc107;
+            font-size: 1.2em;
+        }
+        .welcome-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .file-icon {
+            font-size: 3em;
+            color: #0d6efd;
+        }
+        .mission-card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background: white;
+        }
+        .text-purple {
+            color: #8b5cf6 !important;
+        }
+        .bg-purple {
+            background-color: #8b5cf6 !important;
+        }
+        .border-purple {
+            border-color: #8b5cf6 !important;
+        }
+        .btn-outline-purple {
+            color: #8b5cf6;
+            border-color: #8b5cf6;
+        }
+        .btn-outline-purple:hover {
+            color: white;
+            background-color: #8b5cf6;
+            border-color: #8b5cf6;
+        }
+        .group-hover:hover {
+            transform: translateY(-2px);
+            transition: transform 0.2s ease;
+        }
+        
+        /* Estilos para mensajes flotantes */
+        .mensaje-flotante {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+            border-left: 5px solid #ff6b6b;
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 15px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+            animation: slideInRight 0.5s ease-out;
+            position: relative;
+            max-width: 400px;
+        }
+
+        .mensaje-flotante-contenido {
+            color: #2c3e50;
+            font-weight: 600;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            padding-right: 30px;
+            margin: 0;
+        }
+
+        .mensaje-flotante-fecha {
+            color: #555;
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+            display: block;
+            opacity: 0.8;
+        }
+
+        .mensaje-flotante-cerrar {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+            color: #ff6b6b;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .mensaje-flotante-cerrar:hover {
+            background: #ff6b6b;
+            color: white;
+            transform: rotate(90deg);
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+        }
+
+        .mensaje-saliendo {
+            animation: slideOutRight 0.3s ease-out forwards;
+        }
+
+        /* Responsive para mensajes flotantes */
+        @media (max-width: 768px) {
+            #mensajes-flotantes-container {
+                top: 70px;
+                right: 10px;
+                left: 10px;
+                width: auto;
+                max-width: none;
+            }
+            
+            .mensaje-flotante {
+                max-width: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Contenedor de mensajes flotantes -->
+    <div id="mensajes-flotantes-container" style="
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 9999;
+        max-width: 400px;
+        width: calc(100% - 40px);
+    "></div>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4"><i class="bi bi-pc-display-horizontal"></i> Taller</h4>
+                    <div class="d-flex align-items-center mb-4">
+                        <!-- 🆕 FOTO DE PERFIL MEJORADA -->
+                        {% if alumno.foto_perfil %}
+                        <div class="position-relative">
+                            <img src="{{ url_for('alumno.ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                                 alt="Foto de perfil"
+                                 class="rounded-circle border border-3 border-white"
+                                 style="width: 50px; height: 50px; object-fit: cover; cursor: pointer;"
+                                 data-bs-toggle="modal" 
+                                 data-bs-target="#modalFotoPerfil">
+                            <button class="btn btn-sm btn-light rounded-circle position-absolute bottom-0 end-0 p-0" 
+                                    style="width: 20px; height: 20px; line-height: 1;"
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#modalFotoPerfil">
+                                <i class="bi bi-pencil" style="font-size: 0.7rem;"></i>
+                            </button>
+                        </div>
+                        {% else %}
+                        <div class="rounded-circle bg-light d-flex align-items-center justify-content-center position-relative" 
+                             style="width: 50px; height: 50px; color: #0d6efd; font-weight: bold; font-size: 1.2em; cursor: pointer;"
+                             data-bs-toggle="modal" 
+                             data-bs-target="#modalFotoPerfil">
+                            {{ session.alumno_nombre[0] }}
+                            <button class="btn btn-sm btn-primary rounded-circle position-absolute bottom-0 end-0 p-0" 
+                                    style="width: 20px; height: 20px; line-height: 1;"
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#modalFotoPerfil">
+                                <i class="bi bi-plus" style="font-size: 0.7rem;"></i>
+                            </button>
+                        </div>
+                        {% endif %}
+                        <div class="ms-3">
+                            <h6 class="mb-0">{{ session.alumno_nombre }}</h6>
+                            <small>{{ session.alumno_grado }}</small>
+                        </div>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#">
+                                <i class="bi bi-house-door"></i> Inicio
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#entregas">
+                                <i class="bi bi-folder"></i> Mis Tareas
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#anuncios">
+                                <i class="bi bi-megaphone"></i> Anuncios
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#misiones">
+                                <i class="fas fa-clipboard-check"></i> Misiones
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#chat">
+                                <i class="fas fa-comments"></i> Chat
+                            </a>
+                        </li>
+                        <!-- 🆕 NUEVAS SECCIONES DE ARCHIVOS -->
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.ver_mis_archivos') }}">
+                                <i class="bi bi-folder-fill"></i> Mis Archivos
+                                <span id="badge-archivos-nuevos"></span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.solicitar_archivo') }}">
+                                <i class="bi bi-file-earmark-plus"></i> Solicitar Archivo
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <!-- Welcome Card -->
+                <div class="card welcome-card">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h3 class="card-title">¡Bienvenido, {{ session.alumno_nombre }}!</h3>
+                                <p class="card-text">
+                                    Grado: {{ session.alumno_grado }} | Usuario: {{ session.alumno_username }}
+                                </p>
+                                {% if entregas_calificadas > 0 %}
+                                <div class="d-flex align-items-center">
+                                    <span class="me-3">Promedio: <strong>{{ promedio }}/5</strong></span>
+                                    <div class="star-rating">
+                                        {% for i in range(promedio|int) %}
+                                            <i class="bi bi-star-fill"></i>
+                                        {% endfor %}
+                                        {% if promedio % 1 >= 0.5 %}
+                                            <i class="bi bi-star-half"></i>
+                                        {% endif %}
+                                        {% for i in range(5 - promedio|int - (1 if promedio % 1 >= 0.5 else 0)) %}
+                                            <i class="bi bi-star"></i>
+                                        {% endfor %}
+                                    </div>
+                                    <span class="ms-3">{{ entregas_calificadas }} tarea(s) calificada(s)</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <!-- 🆕 FOTO DE PERFIL GRANDE EN EL HEADER -->
+                                {% if alumno.foto_perfil %}
+                                <div class="position-relative d-inline-block">
+                                    <img src="{{ url_for('alumno.ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                                         alt="Foto de perfil"
+                                         class="rounded-circle border border-4 border-white shadow"
+                                         style="width: 120px; height: 120px; object-fit: cover; cursor: pointer;"
+                                         data-bs-toggle="modal" 
+                                         data-bs-target="#modalFotoPerfil">
+                                    <button class="btn btn-sm btn-light rounded-circle position-absolute bottom-0 end-0 shadow" 
+                                            style="width: 35px; height: 35px;"
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#modalFotoPerfil">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </div>
+                                {% else %}
+                                <div class="position-relative d-inline-block">
+                                    <div class="rounded-circle bg-white d-flex align-items-center justify-content-center shadow" 
+                                         style="width: 120px; height: 120px; color: #667eea; font-weight: bold; font-size: 3em; cursor: pointer;"
+                                         data-bs-toggle="modal" 
+                                         data-bs-target="#modalFotoPerfil">
+                                        {{ session.alumno_nombre[0] }}
+                                    </div>
+                                    <button class="btn btn-sm btn-primary rounded-circle position-absolute bottom-0 end-0 shadow" 
+                                            style="width: 35px; height: 35px;"
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#modalFotoPerfil">
+                                        <i class="bi bi-plus"></i>
+                                    </button>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Upload Section -->
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="bi bi-cloud-arrow-up"></i> Subir Nueva Tarea</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('alumno.subir_tarea') }}" enctype="multipart/form-data">
+                            <!-- ✅ NUEVO CAMPO PARA EL TÍTULO -->
+                            <div class="mb-3">
+                                <label for="titulo_tarea" class="form-label">
+                                    <i class="bi bi-pencil-square"></i> Nombre de la tarea
+                                    <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="titulo_tarea" 
+                                       name="titulo_tarea" 
+                                       placeholder="Ejemplo: Actividad de matemáticas página 45"
+                                       maxlength="200"
+                                       required>
+                                <div class="form-text">
+                                    <i class="bi bi-info-circle"></i> 
+                                    Describe brevemente qué tarea estás entregando
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="archivo" class="form-label">
+                                    <i class="bi bi-file-earmark-arrow-up"></i> Seleccionar archivo
+                                    <span class="text-danger">*</span>
+                                </label>
+                                <input class="form-control" type="file" id="archivo" name="archivo" required>
+                                <div class="form-text">Formatos permitidos: PDF, Word, PowerPoint, imágenes, etc.</div>
+                            </div>
+                            
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> El archivo se asociará automáticamente a tu usuario.
+                            </div>
+                            
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-upload"></i> Enviar Tarea
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Intelligence Missions Section -->
+                <div class="card" id="misiones">
+                    <div class="card-header bg-purple text-white">
+                        <h5 class="mb-0"><i class="fas fa-clipboard-check"></i> Misiones de Inteligencia</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if cuestionarios %}
+                        <p class="text-muted mb-4">Cuestionarios y exámenes pendientes para completar.</p>
+                        
+                        <div class="row">
+                            {% for quest in cuestionarios %}
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="mission-card p-3 h-100 border border-2 border-purple">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="bg-purple bg-opacity-10 text-purple rounded-circle p-2 me-3">
+                                            <i class="fas fa-clipboard-check fa-lg"></i>
+                                        </div>
+                                        <div>
+                                            <h6 class="fw-bold mb-0">{{ quest.titulo }}</h6>
+                                            {% if quest.descripcion %}
+                                            <small class="text-muted">{{ quest.descripcion[:50] }}{% if quest.descripcion|length > 50 %}...{% endif %}</small>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-grid">
+                                        <a href="{{ quest.url }}" target="_blank" 
+                                           class="btn btn-outline-purple btn-sm">
+                                            <i class="fab fa-google me-1"></i> Ir al Cuestionario
+                                        </a>
+                                    </div>
+                                    
+                                    {% if quest.fecha_limite %}
+                                    <div class="mt-3 pt-3 border-top">
+                                        <small class="text-muted">
+                                            <i class="fas fa-clock me-1"></i>
+                                            Límite: {{ quest.fecha_limite.strftime('%d/%m/%Y') }}
+                                        </small>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-clipboard-check fa-4x text-muted mb-3"></i>
+                            <h5 class="text-muted">No hay misiones asignadas</h5>
+                            <p class="text-muted">No tienes cuestionarios pendientes en este momento.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Recent Deliveries -->
+                <div class="card" id="entregas">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Mis Entregas Recientes</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if entregas %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Archivo</th>
+                                        <th>Calificación</th>
+                                        <th>Comentarios</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for entrega in entregas %}
+                                    <tr>
+                                        <td>{{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') }}</td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <i class="bi bi-file-earmark me-2"></i>
+                                                <div>
+                                                    <!-- ✅ MOSTRAR EL TÍTULO DE LA TAREA -->
+                                                    {% if entrega.titulo_tarea %}
+                                                    <strong>{{ entrega.titulo_tarea }}</strong><br>
+                                                    {% endif %}
+                                                    <a href="{{ url_for('alumno.ver_archivo', archivo_path=entrega.archivo_url) }}" 
+                                                       target="_blank" class="text-decoration-none small">
+                                                        Ver archivo
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            {% if entrega.estrellas > 0 %}
+                                            <div class="star-rating">
+                                                {% for i in range(entrega.estrellas) %}
+                                                    <i class="bi bi-star-fill"></i>
+                                                {% endfor %}
+                                                {% for i in range(5 - entrega.estrellas) %}
+                                                    <i class="bi bi-star"></i>
+                                                {% endfor %}
+                                                <span class="ms-2">{{ entrega.estrellas }}/5</span>
+                                            </div>
+                                            {% else %}
+                                            <span class="text-muted">Pendiente</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if entrega.comentarios %}
+                                            <small>{{ entrega.comentarios }}</small>
+                                            {% else %}
+                                            <span class="text-muted">Sin comentarios</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="bi bi-folder-x file-icon"></i>
+                            <h5 class="mt-3">No hay entregas aún</h5>
+                            <p class="text-muted">Sube tu primera tarea usando el formulario de arriba.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Announcements -->
+                <div class="card" id="anuncios">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-megaphone"></i> Anuncios Recientes</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if anuncios %}
+                        <div class="list-group">
+                            {% for anuncio in anuncios %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ anuncio.titulo }}</h6>
+                                    <small class="text-muted">{{ anuncio.fecha.strftime('%d/%m/%Y') }}</small>
+                                </div>
+                                <p class="mb-1">{{ anuncio.contenido }}</p>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-3">No hay anuncios por el momento.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Chat Section -->
+                <div class="card shadow-sm" id="chat" style="height: 500px;">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-comments me-2"></i>Chat de {{ session.alumno_grado }}</h5>
+                        <span class="badge bg-light text-primary" id="statusChat">Conectado</span>
+                    </div>
+                    
+                    <div class="card-body p-3 overflow-auto" id="cajaMensajes" style="background: #f8f9fa;">
+                        <div class="text-center text-muted mt-5">
+                            <i class="fas fa-circle-notch fa-spin"></i> Cargando chat...
+                        </div>
+                    </div>
+
+                    <div class="card-footer bg-white position-relative">
+                        
+                        <div class="emoji-picker" id="emojiMenu" style="display: none; position: absolute; bottom: 100%; left: 10px; background: white; border: 1px solid #ccc; padding: 10px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 9999; width: 260px; grid-template-columns: repeat(6, 1fr); gap: 5px;">
+                            <div class="emoji-btn" onclick="addEmoji('😀')" style="cursor:pointer; padding:5px;">😀</div>
+                            <div class="emoji-btn" onclick="addEmoji('😂')" style="cursor:pointer; padding:5px;">😂</div>
+                            <div class="emoji-btn" onclick="addEmoji('😍')" style="cursor:pointer; padding:5px;">😍</div>
+                            <div class="emoji-btn" onclick="addEmoji('😎')" style="cursor:pointer; padding:5px;">😎</div>
+                            <div class="emoji-btn" onclick="addEmoji('😭')" style="cursor:pointer; padding:5px;">😭</div>
+                            <div class="emoji-btn" onclick="addEmoji('😡')" style="cursor:pointer; padding:5px;">😡</div>
+                            <div class="emoji-btn" onclick="addEmoji('👍')" style="cursor:pointer; padding:5px;">👍</div>
+                            <div class="emoji-btn" onclick="addEmoji('👎')" style="cursor:pointer; padding:5px;">👎</div>
+                            <div class="emoji-btn" onclick="addEmoji('👋')" style="cursor:pointer; padding:5px;">👋</div>
+                            <div class="emoji-btn" onclick="addEmoji('🙌')" style="cursor:pointer; padding:5px;">🙌</div>
+                            <div class="emoji-btn" onclick="addEmoji('🔥')" style="cursor:pointer; padding:5px;">🔥</div>
+                            <div class="emoji-btn" onclick="addEmoji('✨')" style="cursor:pointer; padding:5px;">✨</div>
+                            <div class="emoji-btn" onclick="addEmoji('🤔')" style="cursor:pointer; padding:5px;">🤔</div>
+                            <div class="emoji-btn" onclick="addEmoji('😱')" style="cursor:pointer; padding:5px;">😱</div>
+                            <div class="emoji-btn" onclick="addEmoji('🎉')" style="cursor:pointer; padding:5px;">🎉</div>
+                            <div class="emoji-btn" onclick="addEmoji('💻')" style="cursor:pointer; padding:5px;">💻</div>
+                            <div class="emoji-btn" onclick="addEmoji('🤖')" style="cursor:pointer; padding:5px;">🤖</div>
+                            <div class="emoji-btn" onclick="addEmoji('💯')" style="cursor:pointer; padding:5px;">💯</div>
+                        </div>
+
+                        <form id="formChat" onsubmit="enviarMensaje(event)">
+                            <div class="input-group">
+                                <button type="button" class="btn btn-light border" onclick="toggleEmojiMenu()" style="font-size: 1.2rem; line-height: 1;">
+                                    😀
+                                </button>
+                                
+                                <input type="text" id="inputMensaje" class="form-control" placeholder="Escribe algo..." autocomplete="off">
+                                
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </form>
+
+                        <div id="avisoBloqueo" class="alert alert-warning mb-0 mt-2 text-center" style="display: none;">
+                            <small><i class="fas fa-lock"></i> Chat desactivado por el profesor.</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 🆕 MODAL PARA CAMBIAR FOTO DE PERFIL -->
+    <div class="modal fade" id="modalFotoPerfil" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-camera-fill me-2"></i>
+                        {% if alumno.foto_perfil %}Cambiar{% else %}Agregar{% endif %} Foto de Perfil
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                
+                <div class="modal-body">
+                    <!-- ⚠️ MENSAJE DE ADVERTENCIA -->
+                    <div class="alert alert-warning border-warning">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
+                            <div>
+                                <h6 class="alert-heading mb-2">⚠️ Importante - Lee esto primero</h6>
+                                <p class="mb-0">
+                                    <strong>Evita añadir fotos personales.</strong><br>
+                                    Mejor usa una imagen que te represente: autos, dibujos animados, 
+                                    personajes de videojuegos, mascotas, paisajes, etc. 🚗🎮🐶
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Vista previa actual -->
+                    {% if alumno.foto_perfil %}
+                    <div class="text-center mb-3">
+                        <p class="text-muted mb-2">Foto actual:</p>
+                        <!-- CORRECCIÓN 4 -->
+                        <img src="{{ url_for('alumno.ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                             alt="Foto actual"
+                             class="rounded-circle border border-3"
+                             style="width: 100px; height: 100px; object-fit: cover;">
+                    </div>
+                    {% endif %}
+
+                    <!-- Formulario de subida -->
+                    <form method="POST" action="{{ url_for('alumno.actualizar_foto_perfil') }}" enctype="multipart/form-data" id="formFotoPerfil">
+                        <div class="mb-3">
+                            <label for="fotoInput" class="form-label fw-bold">
+                                Selecciona una nueva imagen
+                            </label>
+                            <input type="file" 
+                                   class="form-control" 
+                                   id="fotoInput" 
+                                   name="foto" 
+                                   accept="image/png, image/jpeg, image/jpg, image/gif, image/webp"
+                                   required
+                                   onchange="previsualizarFoto(event)">
+                            <div class="form-text">
+                                <i class="bi bi-info-circle"></i> 
+                                Formatos: PNG, JPG, GIF, WEBP | Tamaño máximo: 5MB
+                            </div>
+                        </div>
+
+                        <!-- Vista previa de la nueva foto -->
+                        <div id="vistaPrevia" class="text-center mb-3" style="display: none;">
+                            <p class="text-muted mb-2">Vista previa:</p>
+                            <img id="imagenPrevia" 
+                                 class="rounded-circle border border-3"
+                                 style="width: 120px; height: 120px; object-fit: cover;">
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-upload me-2"></i>
+                                {% if alumno.foto_perfil %}Cambiar Foto{% else %}Subir Foto{% endif %}
+                            </button>
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                Cancelar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 🆕 SCRIPT PARA PREVISUALIZAR FOTO -->
+    <script>
+        function previsualizarFoto(event) {
+            const archivo = event.target.files[0];
+            if (archivo) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('imagenPrevia').src = e.target.result;
+                    document.getElementById('vistaPrevia').style.display = 'block';
+                }
+                reader.readAsDataURL(archivo);
+            }
+        }
+    </script>
+    
+    <script>
+        let chatBloqueado = false;
+
+        // Función para bajar el scroll automáticamente
+        function scrollAlFondo() {
+            const caja = document.getElementById('cajaMensajes');
+            caja.scrollTop = caja.scrollHeight;
+        }
+
+        // 1. CARGAR MENSAJES
+        async function actualizarChat() {
+            try {
+                const respuesta = await fetch('/api/chat/obtener');
+                const datos = await respuesta.json();
+                
+                const caja = document.getElementById('cajaMensajes');
+                const input = document.getElementById('inputMensaje');
+                const aviso = document.getElementById('avisoBloqueo');
+                
+                // Manejo del bloqueo
+                if (!datos.activo) {
+                    input.disabled = true;
+                    input.placeholder = "Chat desactivado";
+                    aviso.style.display = 'block';
+                    chatBloqueado = true;
+                } else {
+                    input.disabled = false;
+                    input.placeholder = "Escribe algo...";
+                    aviso.style.display = 'none';
+                    chatBloqueado = false;
+                }
+
+                // Dibujar mensajes
+                let html = '';
+                if(datos.mensajes.length === 0) {
+                    html = '<div class="text-center text-muted mt-4"><small>Sé el primero en escribir.</small></div>';
+                } else {
+                    datos.mensajes.forEach(msg => {
+                        // Estilo diferente si soy yo o es otro
+                        let clase = msg.es_mio ? 'justify-content-end' : 'justify-content-start';
+                        let color = msg.es_mio ? 'bg-primary text-white' : 'bg-white text-dark border';
+                        
+                        html += `
+                            <div class="d-flex ${clase} mb-2">
+                                <div class="px-3 py-2 rounded-3 shadow-sm ${color}" style="max-width: 75%;">
+                                    <small class="d-block fw-bold opacity-75" style="font-size: 0.7rem;">
+                                        ${msg.nombre}
+                                    </small>
+                                    <span>${msg.texto}</span>
+                                    <small class="d-block text-end opacity-50" style="font-size: 0.6rem;">${msg.hora}</small>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                // Solo actualizamos el HTML si cambió algo (para evitar parpadeos masivos)
+                // En esta versión simple reemplazamos todo, pero guardamos la posición del scroll
+                const estabaAbajo = caja.scrollHeight - caja.scrollTop === caja.clientHeight;
+                caja.innerHTML = html;
+                
+                if(estabaAbajo) scrollAlFondo(); // Solo bajar si el usuario ya estaba abajo
+
+            } catch (error) {
+                console.error("Error cargando chat", error);
+            }
+        }
+
+        // 2. ENVIAR MENSAJE
+        async function enviarMensaje(e) {
+            e.preventDefault(); // Evitar recarga de pagina
+            const input = document.getElementById('inputMensaje');
+            const texto = input.value;
+            
+            if (!texto.trim() || chatBloqueado) return;
+
+            // Limpiar input visualmente rápido
+            input.value = '';
+
+            // Enviar al servidor
+            const formData = new FormData();
+            formData.append('mensaje', texto);
+            
+            await fetch('/api/chat/enviar', {
+                method: 'POST',
+                body: formData
+            });
+            
+            // Actualizar chat inmediatamente
+            actualizarChat();
+            setTimeout(scrollAlFondo, 200);
+        }
+
+        // Función para mostrar/ocultar el menú de emojis
+        function toggleEmojiMenu() {
+            const menu = document.getElementById('emojiMenu');
+            menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
+        }
+
+        // Función para agregar un emoji al input
+        function addEmoji(emoji) {
+            const input = document.getElementById('inputMensaje');
+            input.value += emoji;
+            input.focus();
+            document.getElementById('emojiMenu').style.display = 'none';
+        }
+
+        // Cerrar menú de emojis al hacer clic fuera
+        document.addEventListener('click', function(event) {
+            const menu = document.getElementById('emojiMenu');
+            const button = document.querySelector('button[onclick="toggleEmojiMenu()"]');
+            if (menu && !menu.contains(event.target) && !button.contains(event.target)) {
+                menu.style.display = 'none';
+            }
+        });
+
+        // Iniciar el ciclo de actualización (Cada 3 segundos)
+        setInterval(actualizarChat, 3000);
+        actualizarChat(); // Primera carga
+    </script>
+
+    <!-- Scripts para mensajes flotantes -->
+    <script>
+        // Cargar mensajes flotantes al iniciar
+        document.addEventListener('DOMContentLoaded', function() {
+            cargarMensajesFlotantes();
+        });
+
+        function cargarMensajesFlotantes() {
+            fetch('/api/mensajes-flotantes/obtener')
+                .then(response => response.json())
+                .then(mensajes => {
+                    const container = document.getElementById('mensajes-flotantes-container');
+                    
+                    mensajes.forEach(mensaje => {
+                        mostrarMensajeFlotante(mensaje);
+                    });
+                })
+                .catch(error => console.error('Error al cargar mensajes:', error));
+        }
+
+        function mostrarMensajeFlotante(mensaje) {
+            const container = document.getElementById('mensajes-flotantes-container');
+            
+            const div = document.createElement('div');
+            div.className = 'mensaje-flotante';
+            div.dataset.mensajeId = mensaje.id;
+            
+            div.innerHTML = `
+                <button class="mensaje-flotante-cerrar" onclick="cerrarMensaje(${mensaje.id})">
+                    ✕
+                </button>
+                <p class="mensaje-flotante-contenido">
+                    <i class="fas fa-bullhorn me-2"></i>${mensaje.contenido}
+                </p>
+                <small class="mensaje-flotante-fecha">
+                    <i class="far fa-clock me-1"></i>${mensaje.fecha}
+                </small>
+            `;
+            
+            container.appendChild(div);
+        }
+
+        function cerrarMensaje(mensajeId) {
+            const elemento = document.querySelector(`[data-mensaje-id="${mensajeId}"]`);
+            
+            if (elemento) {
+                // Agregar animación de salida
+                elemento.classList.add('mensaje-saliendo');
+                
+                // Marcar como leído en el servidor
+                fetch(`/api/mensajes-flotantes/marcar-leido/${mensajeId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Eliminar el elemento después de la animación
+                    setTimeout(() => {
+                        elemento.remove();
+                    }, 300);
+                })
+                .catch(error => console.error('Error:', error));
+            }
+        }
+    </script>
+
+    <!-- 🆕 SCRIPT PARA NOTIFICACIONES DE ARCHIVOS NUEVOS -->
+    <script>
+        // Actualizar badge de archivos nuevos cada 30 segundos
+        function actualizarBadgeArchivos() {
+            fetch('/api/archivos-nuevos/cantidad')
+                .then(response => response.json())
+                .then(data => {
+                    const badge = document.getElementById('badge-archivos-nuevos');
+                    if (data.cantidad > 0) {
+                        badge.innerHTML = `<span class="badge bg-danger rounded-pill ms-2">${data.cantidad}</span>`;
+                    } else {
+                        badge.innerHTML = '';
+                    }
+                })
+                .catch(error => console.error('Error al obtener archivos nuevos:', error));
+        }
+
+        // Llamar al cargar la página y cada 30 segundos
+        actualizarBadgeArchivos();
+        setInterval(actualizarBadgeArchivos, 30000);
+    </script>
+</body>
+</html>

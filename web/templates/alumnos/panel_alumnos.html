@@ -675,6 +675,216 @@
         </div>
     </div>
 
+    <!-- ============================================================================ -->
+    <!-- MODAL BLOQUEANTE DE ENCUESTA -->
+    <!-- Agregar este código ANTES del cierre </body> en panel_alumnos.html -->
+    <!-- ============================================================================ -->
+
+    <!-- Modal de Encuesta (Bloqueante) -->
+    <div class="modal fade" id="modalEncuesta" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <!-- Header -->
+                <div class="modal-header bg-primary text-white">
+                    <div>
+                        <h5 class="modal-title">
+                            <i class="fas fa-poll me-2"></i>
+                            <span id="encuesta-titulo">Encuesta de Retroalimentación</span>
+                        </h5>
+                        <small id="encuesta-descripcion"></small>
+                    </div>
+                </div>
+                
+                <!-- Body -->
+                <div class="modal-body">
+                    <div class="alert alert-info border-0 mb-4">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Tu opinión es importante:</strong> Por favor responde con sinceridad. 
+                        Esta encuesta nos ayuda a mejorar las clases.
+                    </div>
+
+                    <form id="formEncuesta">
+                        <input type="hidden" id="encuesta-id" value="">
+                        
+                        <!-- Pregunta 1 -->
+                        <div class="mb-4 p-3 bg-light rounded">
+                            <label class="form-label fw-bold mb-3">
+                                1. ¿Te gustan las clases de cómputo?
+                            </label>
+                            <div class="rating-stars text-center" data-pregunta="pregunta1">
+                                <i class="far fa-star" data-valor="1"></i>
+                                <i class="far fa-star" data-valor="2"></i>
+                                <i class="far fa-star" data-valor="3"></i>
+                                <i class="far fa-star" data-valor="4"></i>
+                                <i class="far fa-star" data-valor="5"></i>
+                            </div>
+                            <input type="hidden" name="pregunta1" id="pregunta1" required>
+                            <div class="text-center mt-2">
+                                <small class="text-muted">
+                                    <span class="me-3">😞 Nada</span>
+                                    <span>😊 Mucho</span>
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- Pregunta 2 -->
+                        <div class="mb-4 p-3 bg-light rounded">
+                            <label class="form-label fw-bold mb-3">
+                                2. ¿Sientes que estás aprendiendo cosas nuevas?
+                            </label>
+                            <div class="rating-stars text-center" data-pregunta="pregunta2">
+                                <i class="far fa-star" data-valor="1"></i>
+                                <i class="far fa-star" data-valor="2"></i>
+                                <i class="far fa-star" data-valor="3"></i>
+                                <i class="far fa-star" data-valor="4"></i>
+                                <i class="far fa-star" data-valor="5"></i>
+                            </div>
+                            <input type="hidden" name="pregunta2" id="pregunta2" required>
+                            <div class="text-center mt-2">
+                                <small class="text-muted">
+                                    <span class="me-3">😕 Poco</span>
+                                    <span>🤓 Mucho</span>
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- Pregunta 3 -->
+                        <div class="mb-4 p-3 bg-light rounded">
+                            <label class="form-label fw-bold mb-3">
+                                3. ¿Cómo calificarías al maestro?
+                            </label>
+                            <div class="rating-stars text-center" data-pregunta="pregunta3">
+                                <i class="far fa-star" data-valor="1"></i>
+                                <i class="far fa-star" data-valor="2"></i>
+                                <i class="far fa-star" data-valor="3"></i>
+                                <i class="far fa-star" data-valor="4"></i>
+                                <i class="far fa-star" data-valor="5"></i>
+                            </div>
+                            <input type="hidden" name="pregunta3" id="pregunta3" required>
+                            <div class="text-center mt-2">
+                                <small class="text-muted">
+                                    <span class="me-3">😐 Regular</span>
+                                    <span>🌟 Excelente</span>
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- Pregunta 4 -->
+                        <div class="mb-4 p-3 bg-light rounded">
+                            <label class="form-label fw-bold mb-3">
+                                4. ¿El contenido de las clases es interesante?
+                            </label>
+                            <div class="rating-stars text-center" data-pregunta="pregunta4">
+                                <i class="far fa-star" data-valor="1"></i>
+                                <i class="far fa-star" data-valor="2"></i>
+                                <i class="far fa-star" data-valor="3"></i>
+                                <i class="far fa-star" data-valor="4"></i>
+                                <i class="far fa-star" data-valor="5"></i>
+                            </div>
+                            <input type="hidden" name="pregunta4" id="pregunta4" required>
+                            <div class="text-center mt-2">
+                                <small class="text-muted">
+                                    <span class="me-3">😴 Aburrido</span>
+                                    <span>🎉 Interesante</span>
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- Pregunta 5 -->
+                        <div class="mb-4 p-3 bg-light rounded">
+                            <label class="form-label fw-bold mb-3">
+                                5. ¿La dificultad de las actividades es adecuada?
+                            </label>
+                            <div class="rating-stars text-center" data-pregunta="pregunta5">
+                                <i class="far fa-star" data-valor="1"></i>
+                                <i class="far fa-star" data-valor="2"></i>
+                                <i class="far fa-star" data-valor="3"></i>
+                                <i class="far fa-star" data-valor="4"></i>
+                                <i class="far fa-star" data-valor="5"></i>
+                            </div>
+                            <input type="hidden" name="pregunta5" id="pregunta5" required>
+                            <div class="text-center mt-2">
+                                <small class="text-muted">
+                                    <span class="me-3">😰 Difícil</span>
+                                    <span>✅ Adecuada</span>
+                                </small>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <!-- Comentarios opcionales -->
+                        <h6 class="fw-bold mb-3">
+                            <i class="fas fa-comments me-2"></i>Cuéntanos más (Opcional)
+                        </h6>
+
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="fas fa-heart text-danger me-1"></i>
+                                ¿Qué es lo que más te gusta de las clases?
+                            </label>
+                            <textarea class="form-control" name="comentario_positivo" rows="2" 
+                                      placeholder="Escribe aquí..."></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="fas fa-lightbulb text-warning me-1"></i>
+                                ¿Qué mejorarías o cambiarías?
+                            </label>
+                            <textarea class="form-control" name="comentario_mejora" rows="2" 
+                                      placeholder="Escribe aquí..."></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="fas fa-comment text-info me-1"></i>
+                                ¿Algo más que quieras decirnos?
+                            </label>
+                            <textarea class="form-control" name="comentario_adicional" rows="2" 
+                                      placeholder="Escribe aquí..."></textarea>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Footer -->
+                <div class="modal-footer bg-light">
+                    <div class="w-100">
+                        <div id="error-encuesta" class="alert alert-danger d-none"></div>
+                        <button type="button" class="btn btn-primary btn-lg w-100" onclick="enviarEncuesta()">
+                            <i class="fas fa-paper-plane me-2"></i>Enviar Respuestas
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Estilos para las estrellas de rating -->
+    <style>
+    .rating-stars {
+        font-size: 2.5rem;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .rating-stars i {
+        color: #ddd;
+        transition: all 0.2s;
+        margin: 0 5px;
+    }
+
+    .rating-stars i:hover,
+    .rating-stars i.active {
+        color: #ffc107;
+        transform: scale(1.2);
+    }
+
+    .modal-dialog-scrollable .modal-body {
+        max-height: calc(100vh - 200px);
+    }
+    </style>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- 🆕 SCRIPT PARA PREVISUALIZAR FOTO -->
@@ -902,6 +1112,150 @@
         // Llamar al cargar la página y cada 30 segundos
         actualizarBadgeArchivos();
         setInterval(actualizarBadgeArchivos, 30000);
+    </script>
+
+    <!-- Script para manejar la encuesta -->
+    <script>
+    // Variables globales
+    let encuestaPendiente = null;
+
+    // Verificar encuesta pendiente al cargar la página
+    document.addEventListener('DOMContentLoaded', function() {
+        verificarEncuestaPendiente();
+    });
+
+    function verificarEncuestaPendiente() {
+        fetch('{{ url_for("alumno.verificar_encuesta_pendiente") }}')
+            .then(response => response.json())
+            .then(data => {
+                if (data.tiene_pendiente) {
+                    // Hay encuesta pendiente, mostrar modal
+                    encuestaPendiente = data;
+                    document.getElementById('encuesta-id').value = data.encuesta_id;
+                    document.getElementById('encuesta-titulo').textContent = data.titulo;
+                    
+                    if (data.descripcion) {
+                        document.getElementById('encuesta-descripcion').textContent = data.descripcion;
+                    }
+                    
+                    // Mostrar el modal
+                    const modal = new bootstrap.Modal(document.getElementById('modalEncuesta'));
+                    modal.show();
+                }
+            })
+            .catch(error => {
+                console.error('Error al verificar encuesta:', error);
+            });
+    }
+
+    // Manejar clicks en las estrellas
+    document.querySelectorAll('.rating-stars').forEach(container => {
+        const pregunta = container.getAttribute('data-pregunta');
+        const stars = container.querySelectorAll('i');
+        const input = document.getElementById(pregunta);
+        
+        stars.forEach(star => {
+            star.addEventListener('click', function() {
+                const valor = parseInt(this.getAttribute('data-valor'));
+                input.value = valor;
+                
+                // Actualizar visualización de estrellas
+                stars.forEach((s, index) => {
+                    if (index < valor) {
+                        s.classList.remove('far');
+                        s.classList.add('fas', 'active');
+                    } else {
+                        s.classList.remove('fas', 'active');
+                        s.classList.add('far');
+                    }
+                });
+            });
+            
+            // Efecto hover
+            star.addEventListener('mouseenter', function() {
+                const valor = parseInt(this.getAttribute('data-valor'));
+                stars.forEach((s, index) => {
+                    if (index < valor) {
+                        s.style.color = '#ffc107';
+                    } else {
+                        s.style.color = '#ddd';
+                    }
+                });
+            });
+        });
+        
+        container.addEventListener('mouseleave', function() {
+            const valorActual = parseInt(input.value) || 0;
+            stars.forEach((s, index) => {
+                if (index < valorActual) {
+                    s.style.color = '#ffc107';
+                } else {
+                    s.style.color = '#ddd';
+                }
+            });
+        });
+    });
+
+    function enviarEncuesta() {
+        const form = document.getElementById('formEncuesta');
+        const formData = new FormData(form);
+        const errorDiv = document.getElementById('error-encuesta');
+        const encuestaId = document.getElementById('encuesta-id').value;
+        
+        // Validar que todas las preguntas estén respondidas
+        for (let i = 1; i <= 5; i++) {
+            if (!formData.get('pregunta' + i)) {
+                errorDiv.textContent = 'Por favor responde todas las preguntas (selecciona estrellas)';
+                errorDiv.classList.remove('d-none');
+                return;
+            }
+        }
+        
+        errorDiv.classList.add('d-none');
+        
+        // Deshabilitar botón
+        const btn = event.target;
+        const textOriginal = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Enviando...';
+        
+        // Enviar respuesta
+        fetch(`{{ url_for("alumno.responder_encuesta", encuesta_id=0) }}`.replace('0', encuestaId), {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Mostrar mensaje de éxito
+                const modalBody = document.querySelector('#modalEncuesta .modal-body');
+                modalBody.innerHTML = `
+                    <div class="text-center py-5">
+                        <i class="fas fa-check-circle fa-5x text-success mb-3"></i>
+                        <h4 class="mb-3">${data.message}</h4>
+                        <p class="text-muted">Tu opinión nos ayuda a mejorar</p>
+                    </div>
+                `;
+                
+                // Cerrar modal después de 2 segundos
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                errorDiv.textContent = data.error || 'Error al enviar la encuesta';
+                errorDiv.classList.remove('d-none');
+                btn.disabled = false;
+                btn.innerHTML = textOriginal;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            errorDiv.textContent = 'Error de conexión. Intenta de nuevo.';
+            errorDiv.classList.remove('d-none');
+            btn.disabled = false;
+            btn.innerHTML = textOriginal;
+        });
+    }
     </script>
 </body>
 </html>

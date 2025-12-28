@@ -245,3 +245,91 @@ class ArchivoEnviado(db.Model):
     # Relaciones usando backref (se mantienen aquí)
     alumno = db.relationship('UsuarioAlumno', backref='archivos_recibidos')
     solicitud = db.relationship('SolicitudArchivo', backref='archivo_respuesta', uselist=False)
+
+class Encuesta(db.Model):
+    """Encuestas de retroalimentación enviadas por el profesor"""
+    __tablename__ = 'encuestas'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    titulo = db.Column(db.String(200), nullable=False)
+    descripcion = db.Column(db.Text, nullable=True)
+    
+    # A quién va dirigida
+    grupos_destino = db.Column(db.String(200), nullable=False)  # "todos" o "1A,2B,3A"
+    
+    # Estado
+    activa = db.Column(db.Boolean, default=True)
+    obligatoria = db.Column(db.Boolean, default=True)  # Si bloquea el acceso
+    
+    # Metadatos
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_cierre = db.Column(db.DateTime, nullable=True)  # Opcional: fecha límite
+    creado_por = db.Column(db.String(100), nullable=False)
+    
+    # Relaciones
+    respuestas = db.relationship('RespuestaEncuesta', backref='encuesta', lazy=True, cascade='all, delete-orphan')
+    
+    def grupos_lista(self):
+        """Retorna lista de grupos destino"""
+        if self.grupos_destino == 'todos':
+            return ['todos']
+        return [g.strip() for g in self.grupos_destino.split(',') if g.strip()]
+    
+    def aplica_para_grupo(self, grado_grupo):
+        """Verifica si la encuesta aplica para un grupo específico"""
+        if self.grupos_destino == 'todos':
+            return True
+        return grado_grupo in self.grupos_lista()
+    
+    def total_respuestas(self):
+        """Cuenta total de respuestas recibidas"""
+        return RespuestaEncuesta.query.filter_by(encuesta_id=self.id).count()
+    
+    def alumno_ya_respondio(self, alumno_id):
+        """Verifica si un alumno ya respondió esta encuesta"""
+        return RespuestaEncuesta.query.filter_by(
+            encuesta_id=self.id,
+            alumno_id=alumno_id
+        ).first() is not None
+
+
+class RespuestaEncuesta(db.Model):
+    """Respuestas individuales de alumnos a las encuestas"""
+    __tablename__ = 'respuestas_encuesta'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    encuesta_id = db.Column(db.Integer, db.ForeignKey('encuestas.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Información del alumno (para facilitar consultas)
+    nombre_alumno = db.Column(db.String(100), nullable=False)
+    grado_grupo = db.Column(db.String(20), nullable=False)
+    
+    # Respuestas a preguntas predefinidas (escala 1-5)
+    pregunta1_clases = db.Column(db.Integer, nullable=False)  # ¿Te gustan las clases?
+    pregunta2_aprendizaje = db.Column(db.Integer, nullable=False)  # ¿Sientes que aprendes?
+    pregunta3_maestro = db.Column(db.Integer, nullable=False)  # ¿Cómo calificarías al maestro?
+    pregunta4_contenido = db.Column(db.Integer, nullable=False)  # ¿El contenido es interesante?
+    pregunta5_dificultad = db.Column(db.Integer, nullable=False)  # ¿La dificultad es adecuada?
+    
+    # Comentarios adicionales
+    comentario_positivo = db.Column(db.Text, nullable=True)  # ¿Qué te gusta más?
+    comentario_mejora = db.Column(db.Text, nullable=True)  # ¿Qué mejorarías?
+    comentario_adicional = db.Column(db.Text, nullable=True)  # Otros comentarios
+    
+    # Metadatos
+    fecha_respuesta = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relaciones
+    alumno = db.relationship('UsuarioAlumno', backref='respuestas_encuestas')
+    
+    def promedio_respuestas(self):
+        """Calcula el promedio de las respuestas numéricas"""
+        respuestas = [
+            self.pregunta1_clases,
+            self.pregunta2_aprendizaje,
+            self.pregunta3_maestro,
+            self.pregunta4_contenido,
+            self.pregunta5_dificultad
+        ]
+        return sum(respuestas) / len(respuestas)

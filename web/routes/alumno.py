@@ -1,6 +1,6 @@
 # web/routes/alumno.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, send_file, send_from_directory
-from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion
+from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion, Encuesta, RespuestaEncuesta
 from web.extensions import db
 from web.utils import require_alumno, s3_manager, file_validator, guardar_archivo, chat_limiter, log_error
 from datetime import datetime
@@ -420,6 +420,99 @@ def ver_archivo(archivo_path):
         log_error(f"Error al servir archivo: {str(e)}")
         flash(f'Error al cargar el archivo: {str(e)}', 'danger')
         return redirect(url_for('alumno.dashboard'))
+
+# --- RUTAS PARA SISTEMA DE ENCUESTAS - ALUMNO ---
+# =============================================================================
+# ENCUESTAS - RESPUESTAS DE ALUMNOS
+# =============================================================================
+
+@alumno_bp.route('/encuesta/pendiente')
+@require_alumno
+def verificar_encuesta_pendiente():
+    """API para verificar si hay encuesta pendiente (se llama desde JS)"""
+    alumno_id = session.get('alumno_id')
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    
+    if not alumno:
+        return jsonify({'tiene_pendiente': False})
+    
+    # Buscar encuestas activas, obligatorias que aplican para este grupo
+    encuestas_activas = Encuesta.query.filter_by(activa=True, obligatoria=True).all()
+    
+    for encuesta in encuestas_activas:
+        # Verificar si aplica para el grupo del alumno
+        if encuesta.aplica_para_grupo(alumno.grado_grupo):
+            # Verificar si ya respondió
+            if not encuesta.alumno_ya_respondio(alumno_id):
+                # Tiene una encuesta pendiente
+                return jsonify({
+                    'tiene_pendiente': True,
+                    'encuesta_id': encuesta.id,
+                    'titulo': encuesta.titulo,
+                    'descripcion': encuesta.descripcion
+                })
+    
+    return jsonify({'tiene_pendiente': False})
+
+
+@alumno_bp.route('/encuesta/<int:encuesta_id>/responder', methods=['POST'])
+@require_alumno
+def responder_encuesta(encuesta_id):
+    """Guardar respuesta de encuesta del alumno"""
+    try:
+        alumno_id = session.get('alumno_id')
+        alumno = UsuarioAlumno.query.get(alumno_id)
+        encuesta = Encuesta.query.get_or_404(encuesta_id)
+        
+        if not alumno:
+            return jsonify({'success': False, 'error': 'Alumno no encontrado'}), 400
+        
+        # Verificar que no haya respondido ya
+        if encuesta.alumno_ya_respondio(alumno_id):
+            return jsonify({'success': False, 'error': 'Ya respondiste esta encuesta'}), 400
+        
+        # Obtener respuestas del formulario
+        pregunta1 = int(request.form.get('pregunta1', 0))
+        pregunta2 = int(request.form.get('pregunta2', 0))
+        pregunta3 = int(request.form.get('pregunta3', 0))
+        pregunta4 = int(request.form.get('pregunta4', 0))
+        pregunta5 = int(request.form.get('pregunta5', 0))
+        
+        comentario_positivo = request.form.get('comentario_positivo', '').strip()
+        comentario_mejora = request.form.get('comentario_mejora', '').strip()
+        comentario_adicional = request.form.get('comentario_adicional', '').strip()
+        
+        # Validar que todas las preguntas obligatorias estén respondidas
+        if any(p < 1 or p > 5 for p in [pregunta1, pregunta2, pregunta3, pregunta4, pregunta5]):
+            return jsonify({'success': False, 'error': 'Debes responder todas las preguntas'}), 400
+        
+        # Crear respuesta
+        respuesta = RespuestaEncuesta(
+            encuesta_id=encuesta_id,
+            alumno_id=alumno_id,
+            nombre_alumno=alumno.nombre_completo,
+            grado_grupo=alumno.grado_grupo,
+            pregunta1_clases=pregunta1,
+            pregunta2_aprendizaje=pregunta2,
+            pregunta3_maestro=pregunta3,
+            pregunta4_contenido=pregunta4,
+            pregunta5_dificultad=pregunta5,
+            comentario_positivo=comentario_positivo if comentario_positivo else None,
+            comentario_mejora=comentario_mejora if comentario_mejora else None,
+            comentario_adicional=comentario_adicional if comentario_adicional else None
+        )
+        
+        db.session.add(respuesta)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '¡Gracias por tu retroalimentación! 😊'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @alumno_bp.route('/logout')
 def logout():

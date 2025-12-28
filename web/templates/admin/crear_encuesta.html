@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            
+            <!-- Header -->
+            <div class="mb-4">
+                <a href="{{ url_for('admin.gestionar_encuestas') }}" class="text-decoration-none text-muted mb-3 d-inline-block">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a encuestas
+                </a>
+                <h2 class="fw-bold">
+                    <i class="fas fa-plus-circle me-2"></i>Crear Nueva Encuesta
+                </h2>
+                <p class="text-muted">Los alumnos verán un modal obligatorio al entrar al panel</p>
+            </div>
+
+            <!-- Formulario -->
+            <div class="glass-card p-4">
+                <form action="{{ url_for('admin.crear_encuesta') }}" method="POST">
+                    
+                    <!-- Información básica -->
+                    <div class="mb-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-info-circle me-2 text-primary"></i>Información Básica
+                        </h5>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Título de la Encuesta *</label>
+                            <input type="text" class="form-control form-control-lg" name="titulo" 
+                                   placeholder="Ej: Retroalimentación del Primer Trimestre" required>
+                            <div class="form-text">Breve y descriptivo</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Descripción (Opcional)</label>
+                            <textarea class="form-control" name="descripcion" rows="3" 
+                                      placeholder="Explica brevemente el propósito de la encuesta..."></textarea>
+                            <div class="form-text">Los alumnos verán esto antes de responder</div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Destinatarios -->
+                    <div class="mb-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-users me-2 text-success"></i>¿A quién va dirigida?
+                        </h5>
+                        
+                        <div class="mb-3">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" name="grupos" value="todos" id="todos"
+                                       onchange="toggleGrupos(this)">
+                                <label class="form-check-label fw-bold" for="todos">
+                                    Todos los grupos
+                                </label>
+                            </div>
+                            
+                            <div id="grupos-individuales" class="ms-4">
+                                <p class="small text-muted mb-2">O selecciona grupos específicos:</p>
+                                <div class="row">
+                                    {% for grupo in grupos %}
+                                    <div class="col-md-4 col-6 mb-2">
+                                        <div class="form-check">
+                                            <input class="form-check-input grupo-checkbox" type="checkbox" 
+                                                   name="grupos" value="{{ grupo }}" id="grupo_{{ grupo }}">
+                                            <label class="form-check-label" for="grupo_{{ grupo }}">
+                                                {{ grupo }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Configuración -->
+                    <div class="mb-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-cog me-2 text-info"></i>Configuración
+                        </h5>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" name="obligatoria" 
+                                   id="obligatoria" checked>
+                            <label class="form-check-label" for="obligatoria">
+                                <strong>Encuesta obligatoria</strong>
+                                <small class="d-block text-muted">
+                                    Si está activa, los alumnos no podrán acceder al panel hasta contestar
+                                </small>
+                            </label>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Fecha límite (Opcional)</label>
+                            <input type="date" class="form-control" name="fecha_cierre">
+                            <div class="form-text">
+                                Después de esta fecha, la encuesta se desactivará automáticamente
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Preguntas predefinidas (info) -->
+                    <div class="alert alert-info border-0">
+                        <h6 class="fw-bold mb-2">
+                            <i class="fas fa-question-circle me-2"></i>Preguntas de la Encuesta
+                        </h6>
+                        <p class="small mb-2">La encuesta incluye las siguientes preguntas (escala 1-5):</p>
+                        <ol class="small mb-2">
+                            <li>¿Te gustan las clases de cómputo?</li>
+                            <li>¿Sientes que estás aprendiendo cosas nuevas?</li>
+                            <li>¿Cómo calificarías al maestro?</li>
+                            <li>¿El contenido de las clases es interesante?</li>
+                            <li>¿La dificultad de las actividades es adecuada?</li>
+                        </ol>
+                        <p class="small mb-0 text-muted">
+                            Además, los alumnos podrán dejar comentarios opcionales sobre qué les gusta, 
+                            qué mejorarían, y observaciones adicionales.
+                        </p>
+                    </div>
+
+                    <!-- Botones -->
+                    <div class="d-flex gap-2 justify-content-end mt-4">
+                        <a href="{{ url_for('admin.gestionar_encuestas') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-times me-2"></i>Cancelar
+                        </a>
+                        <button type="submit" class="btn btn-primary btn-lg px-5">
+                            <i class="fas fa-paper-plane me-2"></i>Crear y Enviar
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleGrupos(checkbox) {
+    const gruposIndividuales = document.getElementById('grupos-individuales');
+    const grupoCheckboxes = document.querySelectorAll('.grupo-checkbox');
+    
+    if (checkbox.checked) {
+        // Deshabilitar checkboxes individuales
+        grupoCheckboxes.forEach(cb => {
+            cb.checked = false;
+            cb.disabled = true;
+        });
+        gruposIndividuales.style.opacity = '0.5';
+    } else {
+        // Habilitar checkboxes individuales
+        grupoCheckboxes.forEach(cb => {
+            cb.disabled = false;
+        });
+        gruposIndividuales.style.opacity = '1';
+    }
+}
+
+// Validar que se seleccione al menos un grupo
+document.querySelector('form').addEventListener('submit', function(e) {
+    const todosChecked = document.getElementById('todos').checked;
+    const algunGrupoChecked = Array.from(document.querySelectorAll('.grupo-checkbox'))
+        .some(cb => cb.checked);
+    
+    if (!todosChecked && !algunGrupoChecked) {
+        e.preventDefault();
+        alert('Debes seleccionar al menos un grupo destinatario');
+    }
+});
+</script>
+
+{% endblock %}

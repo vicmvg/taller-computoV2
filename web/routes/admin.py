@@ -1,5 +1,5 @@
 # web/routes/admin.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, send_file, jsonify, send_from_directory
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session, send_file, jsonify, send_from_directory, current_app
 from web.models import (Equipo, Mantenimiento, Anuncio, UsuarioAlumno, 
                         EntregaAlumno, Asistencia, Pago, ReciboPago, SolicitudArchivo,
                         ArchivoEnviado, ReporteAsistencia, ActividadGrado, Cuestionario,
@@ -19,6 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import shutil
 from werkzeug.utils import secure_filename
+from flask_login import login_required
 
 # Definimos el Blueprint para el administrador
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -819,6 +820,56 @@ def eliminar_recurso(id):
     flash('Recurso eliminado de la lista.', 'warning')
     return redirect(url_for('admin.gestionar_recursos'))
 
+@admin_bp.route('/recursos/ver/<path:archivo_path>')
+@require_profesor
+def ver_archivo(archivo_path):
+    """Ver archivos PDF o Word desde recursos"""
+    try:
+        if archivo_path.startswith('uploads/'):
+            # Si usa S3
+            if s3_manager.is_configured:
+                file_stream, content_type = s3_manager.download_file(archivo_path)
+                
+                if file_stream:
+                    filename = archivo_path.split('/')[-1]
+                    
+                    return send_file(
+                        file_stream,
+                        mimetype=content_type,
+                        as_attachment=False,
+                        download_name=filename
+                    )
+            else:
+                flash('Configuración de almacenamiento no disponible', 'danger')
+                return redirect(url_for('admin.gestionar_recursos'))
+        
+        else:
+            # Archivo local
+            filename = archivo_path
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+            
+            if os.path.exists(file_path):
+                if filename.endswith('.pdf'):
+                    mimetype = 'application/pdf'
+                elif filename.endswith(('.doc', '.docx')):
+                    mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                else:
+                    mimetype = 'application/octet-stream'
+                
+                return send_file(
+                    file_path,
+                    mimetype=mimetype,
+                    as_attachment=False,
+                    download_name=filename
+                )
+            else:
+                flash('Archivo no encontrado', 'danger')
+                return redirect(url_for('admin.gestionar_recursos'))
+                
+    except Exception as e:
+        flash(f'Error al cargar el archivo: {str(e)}', 'danger')
+        return redirect(url_for('admin.gestionar_recursos'))
+
 # --- CHAT ---
 @admin_bp.route('/chat/toggle')
 @require_profesor
@@ -1135,7 +1186,6 @@ def crear_pago():
                 )
                 db.session.add(nuevo_pago)
                 pagos_creados += 1
-            
             db.session.commit()
             flash(f'✅ {pagos_creados} pago(s) creado(s) correctamente', 'success')
             return redirect(url_for('admin.gestionar_pagos'))

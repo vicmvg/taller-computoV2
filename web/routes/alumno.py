@@ -1,6 +1,6 @@
 # web/routes/alumno.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, send_file, send_from_directory
-from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido
+from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion
 from web.extensions import db
 from web.utils import require_alumno, s3_manager, file_validator, guardar_archivo, chat_limiter, log_error
 from datetime import datetime
@@ -209,6 +209,10 @@ def obtener_mensajes():
     mi_grupo = session['alumno_grado']
     mensajes = Mensaje.query.filter_by(grado_grupo=mi_grupo).order_by(Mensaje.fecha.asc()).all()
     
+    # ✅ AGREGAR VERIFICACIÓN DEL ESTADO DEL CHAT
+    config = Configuracion.query.get('chat_activo')
+    chat_activo = True if not config or config.valor == 'True' else False
+    
     lista_mensajes = []
     for m in mensajes:
         es_mio = (m.alumno_id == session['alumno_id'])
@@ -221,7 +225,7 @@ def obtener_mensajes():
 
     return jsonify({
         'mensajes': lista_mensajes,
-        'activo': True
+        'activo': chat_activo  # ✅ IMPORTANTE: Devolver el estado
     })
 
 # --- RUTAS DE SISTEMA DE ARCHIVOS ---

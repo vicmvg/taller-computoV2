@@ -1514,7 +1514,7 @@ def ver_archivos_enviados():
                          filtro_alumno=filtro_alumno)
 
 # --- API PARA NOTIFICACIONES ---
-@admin_bp.route('/solicitudes-pendientes/cantidad')
+@admin_bp.route('/api/solicitudes-pendientes/cantidad')  # ✅ Agregué /api/
 @require_profesor
 def cantidad_solicitudes_pendientes():
     cantidad = SolicitudArchivo.query.filter_by(estado='pendiente').count()

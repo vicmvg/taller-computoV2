@@ -675,7 +675,6 @@ def asignar_desde_banco():
 
 # --- GRADOS ---
 @admin_bp.route('/grados', methods=['GET', 'POST'])
-@login_required
 @require_profesor
 def gestionar_grados():
     """Gestionar planeación semanal por grado - VERSIÓN MEJORADA"""

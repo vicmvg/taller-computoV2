@@ -42,7 +42,7 @@
         </div>
 
         <div class="col-md-3">
-            <div class="glass-card text-white border-start border-4 border-info">
+            <div class="card text-white bg-info">
                 <div class="card-body">
                     <h5 class="card-title">{{ alumnos_activos }}</h5>
                     <p class="card-text">Alumnos Activos</p>
@@ -53,7 +53,7 @@
             </div>
         </div>
         <div class="col-md-3">
-            <div class="glass-card text-white border-start border-4 border-success">
+            <div class="card text-white bg-success">
                 <div class="card-body">
                     <h5 class="card-title">{{ total_entregas }}</h5>
                     <p class="card-text">Tareas Entregadas</p>
@@ -69,7 +69,7 @@
     <div class="row g-4">
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.inventario') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-box-open fa-3x text-primary mb-3"></i>
                     <h6 class="fw-bold text-dark">Ver Inventario</h6>
                 </div>
@@ -77,7 +77,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.inventario') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-dark border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-qrcode fa-3x text-dark mb-3"></i>
                     <h6 class="fw-bold text-dark">Generar QRs</h6>
                 </div>
@@ -85,7 +85,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.mantenimiento') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-danger border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-clipboard-list fa-3x text-danger mb-3"></i>
                     <h6 class="fw-bold text-dark">Bitácora Fallas</h6>
                 </div>
@@ -93,7 +93,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_anuncios') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-warning border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-bullhorn fa-3x text-warning mb-3"></i>
                     <h6 class="fw-bold text-dark">Publicar Avisos</h6>
                 </div>
@@ -101,7 +101,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_grados') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-info border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-chalkboard-teacher fa-3x text-info mb-3"></i>
                     <h6 class="fw-bold text-dark">Planeación Semanal</h6>
                 </div>
@@ -109,7 +109,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_cuestionarios') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-purple border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-file-signature fa-3x mb-3" style="color: #8b5cf6;"></i>
                     <h6 class="fw-bold text-dark">Asignar Examen</h6>
                 </div>
@@ -117,7 +117,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_horarios') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-success border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-clock fa-3x text-success mb-3"></i>
                     <h6 class="fw-bold text-dark">Gestionar Horarios</h6>
                 </div>
@@ -125,7 +125,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_plataformas') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-gamepad fa-3x text-primary mb-3"></i>
                     <h6 class="fw-bold text-dark">Sitios Práctica</h6>
                 </div>
@@ -133,7 +133,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_recursos') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-success border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-folder-open fa-3x text-success mb-3"></i>
                     <h6 class="fw-bold text-dark">Subir Recursos</h6>
                 </div>
@@ -141,7 +141,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_banco') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-info border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-archive fa-3x text-info mb-3"></i>
                     <h6 class="fw-bold text-dark">Banco Exámenes</h6>
                 </div>
@@ -157,7 +157,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.configurar_boletas') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-secondary border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift">
                     <i class="fas fa-cog fa-3x text-secondary mb-3"></i>
                     <h6 class="fw-bold text-dark">Configurar Rubros</h6>
                 </div>
@@ -181,7 +181,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_mensajes_flotantes') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-purple border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #6c5ce7;">
                     <i class="fas fa-bullhorn fa-3x mb-3" style="color: #6c5cf7;"></i>
                     <h6 class="fw-bold text-dark">Mensajes Flotantes</h6>
                 </div>
@@ -199,7 +199,7 @@
         <!-- 🆕 NUEVO: ENCUESTAS DE RETROALIMENTACIÓN -->
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_encuestas') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-teal border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #10b981;">
                     <i class="fas fa-poll fa-3x mb-3" style="color: #10b981;"></i>
                     <h6 class="fw-bold text-dark">Encuestas</h6>
                 </div>
@@ -227,7 +227,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.ver_archivos_enviados') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-purple border-top border-4">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #8b5cf6;">
                     <i class="fas fa-folder-open fa-3x mb-3" style="color: #8b5cf6;"></i>
                     <h6 class="fw-bold text-dark">Historial de Archivos</h6>
                 </div>
@@ -255,33 +255,4 @@
     actualizarBadgeSolicitudesDashboard();
     setInterval(actualizarBadgeSolicitudesDashboard, 30000);
 </script>
-
-<style>
-    /* Colores personalizados para bordes */
-    .border-purple {
-        border-color: #8b5cf6 !important;
-    }
-    
-    .border-teal {
-        border-color: #10b981 !important;
-    }
-    
-    /* Para asegurar que los cards de estadísticas también tengan el mismo estilo */
-    .glass-card {
-        background: rgba(255, 255, 255, 0.7);
-        backdrop-filter: blur(10px);
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-    
-    .glass-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-    }
-    
-    .hover-lift:hover {
-        transform: translateY(-5px);
-    }
-</style>
 {% endblock %}

@@ -36,7 +36,7 @@ class Config:
     S3_ENDPOINT = os.environ.get('S3_ENDPOINT')
     S3_KEY = os.environ.get('S3_KEY')
     S3_SECRET = os.environ.get('S3_SECRET')
-    S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'proyectofinalpani')
+    S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'taller-computo')
     
     # Upload Config
     UPLOAD_FOLDER = 'uploads'

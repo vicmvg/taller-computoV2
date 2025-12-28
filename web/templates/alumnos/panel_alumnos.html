@@ -704,7 +704,7 @@
         // 1. CARGAR MENSAJES
         async function actualizarChat() {
             try {
-                const respuesta = await fetch('/api/chat/obtener');
+                const respuesta = await fetch('/alumnos/api/chat/obtener');
                 const datos = await respuesta.json();
                 
                 const caja = document.getElementById('cajaMensajes');
@@ -775,7 +775,7 @@
             const formData = new FormData();
             formData.append('mensaje', texto);
             
-            await fetch('/api/chat/enviar', {
+            await fetch('/alumnos/api/chat/enviar', {
                 method: 'POST',
                 body: formData
             });

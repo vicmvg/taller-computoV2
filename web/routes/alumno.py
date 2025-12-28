@@ -180,7 +180,7 @@ def actualizar_foto_perfil():
     return redirect(url_for('alumno.dashboard'))
 
 # --- RUTAS DE CHAT ---
-@alumno_bp.route('/chat/enviar', methods=['POST'])
+@alumno_bp.route('/api/chat/enviar', methods=['POST'])
 @require_alumno
 def enviar_mensaje():
     alumno_key = f"alumno_{session['alumno_id']}"
@@ -203,7 +203,7 @@ def enviar_mensaje():
     
     return jsonify({'status': 'ok'})
 
-@alumno_bp.route('/chat/obtener')
+@alumno_bp.route('/api/chat/obtener')
 @require_alumno
 def obtener_mensajes():
     mi_grupo = session['alumno_grado']

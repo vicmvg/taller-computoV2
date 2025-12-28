@@ -2,62 +2,241 @@
 
 {% block content %}
 
-<div class="bg-primary py-5 text-white mb-5 position-relative overflow-hidden" style="border-radius: 0 0 30px 30px;">
-    <div class="container position-relative" style="z-index: 2;">
+<style>
+    .semana-banner {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 20px;
+        padding: 2rem;
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+    }
+    
+    .info-card {
+        background: white;
+        border-radius: 15px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        border-left: 4px solid #667eea;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        transition: transform 0.2s;
+    }
+    
+    .info-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+    
+    .icon-box {
+        width: 50px;
+        height: 50px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        flex-shrink: 0;
+    }
+    
+    .objetivo-item {
+        padding: 0.75rem 1rem;
+        background: #f8f9ff;
+        border-radius: 10px;
+        border-left: 3px solid #667eea;
+        margin-bottom: 0.75rem;
+    }
+    
+    .material-item {
+        display: flex;
+        align-items: center;
+        padding: 0.75rem;
+        background: #fff;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        border: 1px solid #e5e7eb;
+    }
+    
+    .material-icon {
+        width: 35px;
+        height: 35px;
+        background: #ecfdf5;
+        color: #059669;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 1rem;
+    }
+    
+    .tarea-destacada {
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        border-radius: 15px;
+        padding: 1.5rem;
+        border: 2px solid #fbbf24;
+    }
+</style>
+
+<div class="container py-4">
+    <!-- Breadcrumb / Navegación -->
+    <div class="mb-4">
+        <a href="{{ url_for('index') }}" class="text-decoration-none text-muted">
+            <i class="fas fa-arrow-left me-2"></i>Volver al inicio
+        </a>
+    </div>
+
+    {% if actividad %}
+    <!-- Banner de la semana -->
+    <div class="semana-banner">
         <div class="row align-items-center">
             <div class="col-md-8">
-                <span class="badge bg-white text-primary mb-2 shadow-sm">Primaria Mariano Escobedo</span>
-                <h1 class="display-4 fw-bold mb-0">Actividades de {{ grado }}° Grado</h1>
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge bg-white text-primary px-3 py-2 me-3">{{ grado }}° Grado</span>
+                    {% if actividad.numero_semana %}
+                    <span class="badge bg-light bg-opacity-25 px-3 py-2">Semana {{ actividad.numero_semana }}</span>
+                    {% endif %}
+                </div>
+                <h1 class="display-5 fw-bold mb-2">{{ actividad.titulo }}</h1>
+                {% if actividad.fecha_inicio and actividad.fecha_fin %}
+                <p class="mb-0 opacity-75">
+                    <i class="fas fa-calendar-alt me-2"></i>
+                    Del {{ actividad.fecha_inicio.strftime('%d/%m/%Y') }} al {{ actividad.fecha_fin.strftime('%d/%m/%Y') }}
+                </p>
+                {% endif %}
             </div>
             <div class="col-md-4 text-end d-none d-md-block">
-                <i class="fas fa-book-reader fa-6x opacity-25"></i>
+                <i class="fas fa-laptop-code fa-5x opacity-25"></i>
             </div>
         </div>
     </div>
-    <div style="position: absolute; top: -50px; right: -50px; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%;"></div>
-</div>
 
-<div class="container pb-5">
-    <div class="row justify-content-center">
+    <div class="row">
+        <!-- Columna principal -->
         <div class="col-lg-8">
             
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <a href="{{ url_for('index') }}" class="text-decoration-none text-muted fw-bold">
-                    <i class="fas fa-arrow-left me-2"></i>Regresar
-                </a>
-                {% if actividad %}
-                <small class="text-muted">Actualizado: {{ actividad.fecha_actualizacion.strftime('%d/%m/%Y') }}</small>
-                {% endif %}
-            </div>
-
-            <div class="glass-card p-5 border-top border-5 border-info shadow-lg">
-                {% if actividad %}
-                    <h2 class="fw-bold text-dark mb-4">{{ actividad.titulo }}</h2>
-                    
-                    <div class="text-secondary" style="font-size: 1.1rem; line-height: 1.8; white-space: pre-line;">
-                        {{ actividad.descripcion }}
+            <!-- Descripción general -->
+            {% if actividad.descripcion %}
+            <div class="info-card">
+                <div class="d-flex align-items-start">
+                    <div class="icon-box bg-primary bg-opacity-10 text-primary me-3">
+                        <i class="fas fa-info-circle"></i>
                     </div>
-
-                    <hr class="my-5 opacity-25">
-
-                    <div class="alert alert-info border-0 d-flex align-items-center">
-                        <i class="fas fa-info-circle fa-2x me-3 text-info"></i>
-                        <div>
-                            <strong>Nota para padres:</strong>
-                            <p class="mb-0 small">Si tienen dudas sobre esta actividad, pueden contactar al profesor en el horario de atención.</p>
+                    <div class="flex-grow-1">
+                        <h5 class="fw-bold mb-3">¿Qué haremos esta semana?</h5>
+                        <div class="text-secondary" style="line-height: 1.8; white-space: pre-line;">
+                            {{ actividad.descripcion }}
                         </div>
                     </div>
+                </div>
+            </div>
+            {% endif %}
 
-                {% else %}
-                    <div class="text-center py-5">
-                        <i class="fas fa-pencil-ruler fa-4x text-muted opacity-25 mb-3"></i>
-                        <h3 class="text-muted">Sin actividades publicadas</h3>
-                        <p class="text-muted">El profesor aún no ha subido la planeación para esta semana.</p>
+            <!-- Objetivos de aprendizaje -->
+            {% if actividad.objetivos %}
+            <div class="info-card">
+                <div class="d-flex align-items-start">
+                    <div class="icon-box bg-success bg-opacity-10 text-success me-3">
+                        <i class="fas fa-bullseye"></i>
                     </div>
-                {% endif %}
+                    <div class="flex-grow-1">
+                        <h5 class="fw-bold mb-3">Objetivos de Aprendizaje</h5>
+                        {% set objetivos_lista = actividad.objetivos.split('\n') %}
+                        {% for objetivo in objetivos_lista %}
+                            {% if objetivo.strip() %}
+                            <div class="objetivo-item">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                {{ objetivo.strip() }}
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Tareas para casa -->
+            {% if actividad.tareas %}
+            <div class="tarea-destacada">
+                <div class="d-flex align-items-start">
+                    <div class="me-3">
+                        <i class="fas fa-home fa-2x text-warning"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                        <h5 class="fw-bold text-dark mb-3">
+                            <i class="fas fa-star text-warning me-2"></i>Tareas para Casa
+                        </h5>
+                        <div class="text-dark" style="line-height: 1.8; white-space: pre-line;">
+                            {{ actividad.tareas }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
+
+        <!-- Columna lateral -->
+        <div class="col-lg-4">
+            
+            <!-- Material necesario -->
+            {% if actividad.material_necesario %}
+            <div class="info-card">
+                <h5 class="fw-bold mb-3">
+                    <i class="fas fa-box text-info me-2"></i>Material Necesario
+                </h5>
+                {% set materiales_lista = actividad.material_necesario.split('\n') %}
+                <div class="material-list">
+                    {% for material in materiales_lista %}
+                        {% if material.strip() %}
+                        <div class="material-item">
+                            <div class="material-icon">
+                                <i class="fas fa-check"></i>
+                            </div>
+                            <span class="text-dark">{{ material.strip() }}</span>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Observaciones -->
+            {% if actividad.observaciones %}
+            <div class="alert alert-info border-0 shadow-sm">
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-lightbulb fa-lg me-3 text-info mt-1"></i>
+                    <div>
+                        <h6 class="fw-bold mb-2">Nota para Padres</h6>
+                        <div class="small" style="line-height: 1.6; white-space: pre-line;">
+                            {{ actividad.observaciones }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Información de actualización -->
+            <div class="text-center text-muted small mt-4 p-3 bg-light rounded">
+                <i class="fas fa-clock me-1"></i>
+                Última actualización: {{ actividad.fecha_actualizacion.strftime('%d/%m/%Y %H:%M') }}
             </div>
 
         </div>
     </div>
+
+    {% else %}
+    <!-- Sin actividades -->
+    <div class="text-center py-5">
+        <div class="mb-4">
+            <i class="fas fa-calendar-times fa-5x text-muted opacity-25"></i>
+        </div>
+        <h3 class="text-muted mb-3">Sin planeación disponible</h3>
+        <p class="text-muted">El profesor aún no ha publicado las actividades para {{ grado }}° grado esta semana.</p>
+        <a href="{{ url_for('index') }}" class="btn btn-outline-primary mt-3">
+            <i class="fas fa-arrow-left me-2"></i>Volver al inicio
+        </a>
+    </div>
+    {% endif %}
+
 </div>
+
 {% endblock %}

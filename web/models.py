@@ -77,12 +77,28 @@ class ReporteAsistencia(db.Model):
     total_registros = db.Column(db.Integer, default=0)
 
 class ActividadGrado(db.Model):
+    """Modelo mejorado para actividades semanales por grado"""
     id = db.Column(db.Integer, primary_key=True)
-    grado = db.Column(db.Integer)
-    titulo = db.Column(db.String(100))
+    grado = db.Column(db.Integer, nullable=False)
+    
+    # Información básica
+    titulo = db.Column(db.String(100), nullable=False)
     descripcion = db.Column(db.Text)
-    imagen_url = db.Column(db.String(200), nullable=True)
-    fecha_actualizacion = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Información de la semana
+    numero_semana = db.Column(db.Integer)
+    fecha_inicio = db.Column(db.Date, nullable=True)
+    fecha_fin = db.Column(db.Date, nullable=True)
+    
+    # Objetivos y contenido
+    objetivos = db.Column(db.Text)
+    material_necesario = db.Column(db.Text)
+    tareas = db.Column(db.Text)
+    observaciones = db.Column(db.Text)
+    
+    # Metadatos
+    fecha_actualizacion = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    actualizado_por = db.Column(db.String(100))
 
 class Cuestionario(db.Model):
     id = db.Column(db.Integer, primary_key=True)

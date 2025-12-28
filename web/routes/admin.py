@@ -7,7 +7,7 @@ from web.models import (Equipo, Mantenimiento, Anuncio, UsuarioAlumno,
                         MensajeLeido, Configuracion, Recurso, CriterioBoleta, BoletaGenerada)
 from web.extensions import db
 from web.utils import require_profesor, s3_manager, guardar_archivo, generar_qr_img, log_error, log_info, generar_pdf_boleta, descargar_archivo, FileValidator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date  # ✅ Agregué 'date' aquí
 import os
 from sqlalchemy import func, case, text
 from io import BytesIO
@@ -19,7 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import shutil
 from werkzeug.utils import secure_filename
-from flask_login import login_required
+from flask_login import login_required  # ✅ Este ya está importado
 
 # Definimos el Blueprint para el administrador
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -675,29 +675,87 @@ def asignar_desde_banco():
 
 # --- GRADOS ---
 @admin_bp.route('/grados', methods=['GET', 'POST'])
+@login_required
 @require_profesor
 def gestionar_grados():
+    """Gestionar planeación semanal por grado - VERSIÓN MEJORADA"""
+    
     if request.method == 'POST':
-        grado_id = int(request.form['grado'])
-        titulo = request.form['titulo']
-        descripcion = request.form['descripcion']
-        
-        actividad = ActividadGrado.query.filter_by(grado=grado_id).first()
-        
-        if not actividad:
-            actividad = ActividadGrado(grado=grado_id)
-        
-        actividad.titulo = titulo
-        actividad.descripcion = descripcion
-        actividad.fecha_actualizacion = datetime.now()
-        
-        if actividad not in db.session:
-            db.session.add(actividad)
-        
-        db.session.commit()
-        flash(f'¡Información de {grado_id}° actualizada!', 'success')
-        return redirect(url_for('admin.gestionar_grados'))
-
+        try:
+            # Obtener datos del formulario
+            grado_id = int(request.form['grado'])
+            titulo = request.form.get('titulo', '').strip()
+            descripcion = request.form.get('descripcion', '').strip()
+            
+            # Nuevos campos
+            numero_semana = request.form.get('numero_semana', '').strip()
+            fecha_inicio = request.form.get('fecha_inicio', '').strip()
+            fecha_fin = request.form.get('fecha_fin', '').strip()
+            objetivos = request.form.get('objetivos', '').strip()
+            material_necesario = request.form.get('material_necesario', '').strip()
+            tareas = request.form.get('tareas', '').strip()
+            observaciones = request.form.get('observaciones', '').strip()
+            
+            # Validar que al menos el título esté presente
+            if not titulo:
+                flash('El título es obligatorio', 'warning')
+                return redirect(url_for('admin.gestionar_grados'))
+            
+            # Buscar o crear actividad
+            actividad = ActividadGrado.query.filter_by(grado=grado_id).first()
+            
+            if not actividad:
+                actividad = ActividadGrado(grado=grado_id)
+            
+            # Actualizar campos básicos
+            actividad.titulo = titulo
+            actividad.descripcion = descripcion if descripcion else None
+            
+            # Actualizar campos de semana
+            actividad.numero_semana = int(numero_semana) if numero_semana else None
+            
+            # Convertir fechas
+            if fecha_inicio:
+                try:
+                    actividad.fecha_inicio = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
+                except:
+                    actividad.fecha_inicio = None
+            else:
+                actividad.fecha_inicio = None
+                
+            if fecha_fin:
+                try:
+                    actividad.fecha_fin = datetime.strptime(fecha_fin, '%Y-%m-%d').date()
+                except:
+                    actividad.fecha_fin = None
+            else:
+                actividad.fecha_fin = None
+            
+            # Actualizar campos de contenido
+            actividad.objetivos = objetivos if objetivos else None
+            actividad.material_necesario = material_necesario if material_necesario else None
+            actividad.tareas = tareas if tareas else None
+            actividad.observaciones = observaciones if observaciones else None
+            
+            # Metadatos
+            actividad.fecha_actualizacion = datetime.now()
+            actividad.actualizado_por = session.get('user', 'Admin')
+            
+            # Guardar
+            if actividad not in db.session:
+                db.session.add(actividad)
+            
+            db.session.commit()
+            
+            flash(f'✅ Planeación de {grado_id}° grado guardada correctamente', 'success')
+            return redirect(url_for('admin.gestionar_grados'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al guardar: {str(e)}', 'danger')
+            return redirect(url_for('admin.gestionar_grados'))
+    
+    # GET - Mostrar formulario
     actividades = ActividadGrado.query.all()
     info_grados = {a.grado: a for a in actividades}
     

@@ -17,7 +17,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # Configuración de logging
 logger = logging.getLogger(__name__)
@@ -422,6 +422,114 @@ def generar_pdf_boleta(alumno, datos_evaluacion, observaciones, promedio, period
     except Exception as e:
         log_error(f"Error al generar PDF de boleta: {str(e)}")
         raise AppError(f"Error al generar boleta: {str(e)}")
+
+def generar_recibo_pdf(numero_recibo, pago, monto_pagado, metodo_pago, observaciones, recibido_por):
+    """Genera PDF de recibo de pago"""
+    try:
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Estilo del título
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1a5490'),
+            spaceAfter=20,
+            alignment=TA_CENTER
+        )
+        
+        # Título
+        elements.append(Paragraph("ESCUELA MARIANO ESCOBEDO", title_style))
+        elements.append(Paragraph("Recibo de Pago", styles['Heading2']))
+        elements.append(Spacer(1, 20))
+        
+        # Información del recibo
+        info_style = ParagraphStyle(
+            'Info',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=10,
+            alignment=TA_LEFT
+        )
+        
+        info_text = f"""
+        <b>Recibo No:</b> {numero_recibo}<br/>
+        <b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}<br/>
+        <b>Alumno:</b> {pago.alumno.nombre_completo}<br/>
+        <b>Grado/Grupo:</b> {pago.alumno.grado_grupo}<br/>
+        <b>Concepto:</b> {pago.concepto}<br/>
+        """
+        
+        elements.append(Paragraph(info_text, info_style))
+        elements.append(Spacer(1, 20))
+        
+        # Tabla de montos
+        data = [
+            ['Concepto', 'Monto'],
+            ['Monto Total del Pago', f'${pago.monto_total:,.2f}'],
+            ['Monto Pagado Anteriormente', f'${pago.monto_pagado - monto_pagado:,.2f}'],
+            ['Pago Actual', f'${monto_pagado:,.2f}'],
+            ['Monto Pendiente', f'${pago.monto_pendiente - monto_pagado:,.2f}'],
+        ]
+        
+        tabla = Table(data, colWidths=[4*inch, 2*inch])
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5490')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#90EE90')),
+            ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
+        ]))
+        
+        elements.append(tabla)
+        elements.append(Spacer(1, 20))
+        
+        # Método de pago
+        metodo_text = f"<b>Método de Pago:</b> {metodo_pago}"
+        elements.append(Paragraph(metodo_text, info_style))
+        elements.append(Spacer(1, 10))
+        
+        # Observaciones
+        if observaciones:
+            obs_text = f"<b>Observaciones:</b><br/>{observaciones}"
+            elements.append(Paragraph(obs_text, info_style))
+            elements.append(Spacer(1, 20))
+        
+        # Recibido por
+        recibido_text = f"<b>Recibido por:</b> {recibido_por}"
+        elements.append(Paragraph(recibido_text, info_style))
+        elements.append(Spacer(1, 40))
+        
+        # Firmas
+        firma_tabla = Table([
+            ['_________________________', '_________________________'],
+            ['Firma del Padre/Tutor', 'Firma del Receptor']
+        ], colWidths=[3*inch, 3*inch])
+        
+        firma_tabla.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 20),
+        ]))
+        
+        elements.append(firma_tabla)
+        
+        # Construir PDF
+        doc.build(elements)
+        buffer.seek(0)
+        
+        return buffer
+        
+    except Exception as e:
+        log_error(f"Error al generar PDF de recibo: {str(e)}")
+        raise AppError(f"Error al generar recibo: {str(e)}")
 
 def descargar_archivo(archivo_url, nombre_archivo, carpeta_local):
     """Función helper para descargar archivos desde S3 o local"""

@@ -5,7 +5,7 @@ from web.models import (Equipo, Mantenimiento, Anuncio, UsuarioAlumno,
                         ArchivoEnviado, ReporteAsistencia, ActividadGrado, Cuestionario,
                         BancoCuestionario, Horario, Plataforma, Mensaje, MensajeFlotante,
                         MensajeLeido, Configuracion, Recurso, CriterioBoleta, BoletaGenerada,
-                        Encuesta, RespuestaEncuesta)  # ✅ Agregados Encuesta y RespuestaEncuesta
+                        Encuesta, RespuestaEncuesta)  # ✅ Agregué Encuesta y RespuestaEncuesta aquí
 from web.extensions import db
 from web.utils import require_profesor, s3_manager, guardar_archivo, generar_qr_img, log_error, log_info, generar_pdf_boleta, descargar_archivo, FileValidator
 from datetime import datetime, timedelta, date  # ✅ Agregué 'date' aquí
@@ -928,169 +928,6 @@ def ver_archivo(archivo_path):
         flash(f'Error al cargar el archivo: {str(e)}', 'danger')
         return redirect(url_for('admin.gestionar_recursos'))
 
-# =============================================================================
-# ENCUESTAS DE RETROALIMENTACIÓN
-# =============================================================================
-
-@admin_bp.route('/encuestas')
-@require_profesor
-def gestionar_encuestas():
-    """Ver todas las encuestas creadas"""
-    encuestas = Encuesta.query.order_by(Encuesta.fecha_creacion.desc()).all()
-    
-    # Calcular estadísticas para cada encuesta
-    for encuesta in encuestas:
-        encuesta.total_respuestas_count = encuesta.total_respuestas()
-        
-        # Calcular promedio general si hay respuestas
-        if encuesta.total_respuestas_count > 0:
-            respuestas = RespuestaEncuesta.query.filter_by(encuesta_id=encuesta.id).all()
-            promedios = [r.promedio_respuestas() for r in respuestas]
-            encuesta.promedio_general = sum(promedios) / len(promedios)
-        else:
-            encuesta.promedio_general = 0
-    
-    return render_template('admin/encuestas.html', encuestas=encuestas)
-
-
-@admin_bp.route('/encuestas/crear', methods=['GET', 'POST'])
-@require_profesor
-def crear_encuesta():
-    """Crear nueva encuesta"""
-    if request.method == 'POST':
-        try:
-            titulo = request.form.get('titulo', '').strip()
-            descripcion = request.form.get('descripcion', '').strip()
-            grupos = request.form.getlist('grupos')  # Lista de grupos seleccionados
-            fecha_cierre = request.form.get('fecha_cierre', '').strip()
-            obligatoria = request.form.get('obligatoria') == 'on'
-            
-            if not titulo:
-                flash('El título es obligatorio', 'warning')
-                return redirect(url_for('admin.crear_encuesta'))
-            
-            # Procesar grupos destino
-            if 'todos' in grupos:
-                grupos_destino = 'todos'
-            else:
-                grupos_destino = ','.join(grupos)
-            
-            if not grupos_destino:
-                flash('Debes seleccionar al menos un grupo', 'warning')
-                return redirect(url_for('admin.crear_encuesta'))
-            
-            # Convertir fecha de cierre
-            fecha_cierre_dt = None
-            if fecha_cierre:
-                try:
-                    fecha_cierre_dt = datetime.strptime(fecha_cierre, '%Y-%m-%d')
-                except:
-                    pass
-            
-            # Crear encuesta
-            nueva_encuesta = Encuesta(
-                titulo=titulo,
-                descripcion=descripcion,
-                grupos_destino=grupos_destino,
-                activa=True,
-                obligatoria=obligatoria,
-                fecha_cierre=fecha_cierre_dt,
-                creado_por=session.get('user', 'Admin')
-            )
-            
-            db.session.add(nueva_encuesta)
-            db.session.commit()
-            
-            flash(f'✅ Encuesta "{titulo}" creada y enviada correctamente', 'success')
-            return redirect(url_for('admin.gestionar_encuestas'))
-            
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Error al crear encuesta: {str(e)}', 'danger')
-            return redirect(url_for('admin.crear_encuesta'))
-    
-    # GET - Mostrar formulario
-    # Obtener lista de grupos únicos
-    grupos_unicos = db.session.query(UsuarioAlumno.grado_grupo)\
-        .filter_by(activo=True)\
-        .distinct()\
-        .order_by(UsuarioAlumno.grado_grupo)\
-        .all()
-    grupos = [g[0] for g in grupos_unicos]
-    
-    return render_template('admin/crear_encuesta.html', grupos=grupos)
-
-
-@admin_bp.route('/encuestas/<int:encuesta_id>/resultados')
-@require_profesor
-def ver_resultados_encuesta(encuesta_id):
-    """Ver resultados detallados de una encuesta"""
-    encuesta = Encuesta.query.get_or_404(encuesta_id)
-    respuestas = RespuestaEncuesta.query.filter_by(encuesta_id=encuesta_id)\
-        .order_by(RespuestaEncuesta.fecha_respuesta.desc()).all()
-    
-    # Calcular estadísticas
-    stats = {
-        'total_respuestas': len(respuestas),
-        'promedio_clases': 0,
-        'promedio_aprendizaje': 0,
-        'promedio_maestro': 0,
-        'promedio_contenido': 0,
-        'promedio_dificultad': 0,
-        'promedio_general': 0
-    }
-    
-    if respuestas:
-        stats['promedio_clases'] = sum(r.pregunta1_clases for r in respuestas) / len(respuestas)
-        stats['promedio_aprendizaje'] = sum(r.pregunta2_aprendizaje for r in respuestas) / len(respuestas)
-        stats['promedio_maestro'] = sum(r.pregunta3_maestro for r in respuestas) / len(respuestas)
-        stats['promedio_contenido'] = sum(r.pregunta4_contenido for r in respuestas) / len(respuestas)
-        stats['promedio_dificultad'] = sum(r.pregunta5_dificultad for r in respuestas) / len(respuestas)
-        
-        # Promedio general
-        promedios = [r.promedio_respuestas() for r in respuestas]
-        stats['promedio_general'] = sum(promedios) / len(promedios)
-    
-    # Agrupar comentarios
-    comentarios_positivos = [r for r in respuestas if r.comentario_positivo]
-    comentarios_mejora = [r for r in respuestas if r.comentario_mejora]
-    comentarios_adicionales = [r for r in respuestas if r.comentario_adicional]
-    
-    return render_template('admin/resultados_encuesta.html',
-                         encuesta=encuesta,
-                         respuestas=respuestas,
-                         stats=stats,
-                         comentarios_positivos=comentarios_positivos,
-                         comentarios_mejora=comentarios_mejora,
-                         comentarios_adicionales=comentarios_adicionales)
-
-
-@admin_bp.route('/encuestas/<int:encuesta_id>/toggle')
-@require_profesor
-def toggle_encuesta(encuesta_id):
-    """Activar/desactivar una encuesta"""
-    encuesta = Encuesta.query.get_or_404(encuesta_id)
-    encuesta.activa = not encuesta.activa
-    db.session.commit()
-    
-    estado = "activada" if encuesta.activa else "desactivada"
-    flash(f'Encuesta {estado} correctamente', 'success')
-    return redirect(url_for('admin.gestionar_encuestas'))
-
-
-@admin_bp.route('/encuestas/<int:encuesta_id>/eliminar')
-@require_profesor
-def eliminar_encuesta(encuesta_id):
-    """Eliminar una encuesta y todas sus respuestas"""
-    encuesta = Encuesta.query.get_or_404(encuesta_id)
-    titulo = encuesta.titulo
-    
-    db.session.delete(encuesta)
-    db.session.commit()
-    
-    flash(f'Encuesta "{titulo}" eliminada correctamente', 'success')
-    return redirect(url_for('admin.gestionar_encuestas'))
-
 # --- CHAT ---
 @admin_bp.route('/chat/toggle')
 @require_profesor
@@ -1572,3 +1409,384 @@ def eliminar_pago(pago_id):
                 try:
                     s3_manager.delete_file(recibo.archivo_url)
                     log_info(f"Archivo eliminado: {recibo.archivo_url}")
+                except Exception as e:
+                    log_warning(f"No se pudo eliminar recibo de S3: {e}")
+            
+            db.session.delete(recibo)
+        
+        db.session.flush()
+        
+        # Eliminar el pago
+        db.session.delete(pago)
+        db.session.commit()
+        
+        flash('Pago y recibos eliminados correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al eliminar pago: {str(e)}")
+        flash(f'Error al eliminar pago: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.gestionar_pagos'))
+
+# --- SISTEMA DE ARCHIVOS ---
+@admin_bp.route('/solicitudes-archivo')
+@require_profesor
+def ver_solicitudes_archivo():
+    filtro_estado = request.args.get('estado', 'todas')
+    
+    query = SolicitudArchivo.query.join(UsuarioAlumno)
+    
+    if filtro_estado != 'todas':
+        query = query.filter(SolicitudArchivo.estado == filtro_estado)
+    
+    solicitudes = query.order_by(SolicitudArchivo.fecha_solicitud.desc()).all()
+    
+    pendientes = SolicitudArchivo.query.filter_by(estado='pendiente').count()
+    
+    return render_template('admin/solicitudes_archivo.html',
+                         solicitudes=solicitudes,
+                         filtro_estado=filtro_estado,
+                         pendientes=pendientes)
+
+# --- NUEVAS RUTAS DE SISTEMA DE ARCHIVOS ---
+@admin_bp.route('/solicitudes-archivo/<int:solicitud_id>/responder', methods=['GET', 'POST'])
+@require_profesor
+def responder_solicitud_archivo(solicitud_id):
+    """Responder a una solicitud enviando un archivo"""
+    solicitud = SolicitudArchivo.query.get_or_404(solicitud_id)
+    
+    if request.method == 'POST':
+        archivo = request.files.get('archivo')
+        mensaje = request.form.get('mensaje', '')
+        
+        if not archivo:
+            flash('Debe seleccionar un archivo PDF', 'danger')
+            return redirect(url_for('admin.responder_solicitud_archivo', solicitud_id=solicitud_id))
+        
+        # Validar que sea PDF
+        if not archivo.filename.lower().endswith('.pdf'):
+            flash('Solo se permiten archivos PDF', 'danger')
+            return redirect(url_for('admin.responder_solicitud_archivo', solicitud_id=solicitud_id))
+        
+        try:
+            # Validar archivo
+            file_stream = BytesIO(archivo.read())
+            validator = FileValidator()
+            validator.validate(file_stream, archivo.filename)
+            
+            # Guardar archivo
+            nombre_archivo = secure_filename(archivo.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            nombre_archivo = f"{timestamp}_{nombre_archivo}"
+            
+            # Subir a S3 o guardar localmente
+            if s3_manager.is_configured:
+                key_s3 = f"archivos_enviados/{solicitud.alumno.grado_grupo}/{nombre_archivo}"
+                archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
+                archivo_url = key_s3
+            else:
+                # Guardar localmente
+                ruta_local = os.path.join('uploads', 'archivos_enviados')
+                os.makedirs(ruta_local, exist_ok=True)
+                archivo_path = os.path.join(ruta_local, nombre_archivo)
+                file_stream.seek(0)
+                with open(archivo_path, 'wb') as f:
+                    f.write(file_stream.read())
+                archivo_url = f"archivos_enviados/{nombre_archivo}"
+            
+            # Crear registro de archivo enviado
+            archivo_enviado = ArchivoEnviado(
+                alumno_id=solicitud.alumno_id,
+                solicitud_id=solicitud.id,
+                titulo=solicitud.tipo_documento,
+                mensaje=mensaje,
+                archivo_url=archivo_url,
+                nombre_archivo=nombre_archivo,
+                enviado_por=session.get('user', 'Profesor')
+            )
+            
+            db.session.add(archivo_enviado)
+            
+            # Actualizar estado de la solicitud
+            solicitud.estado = 'atendida'
+            solicitud.fecha_respuesta = datetime.now()
+            
+            db.session.commit()
+            
+            flash(f'✅ Archivo enviado correctamente a {solicitud.alumno.nombre_completo}', 'success')
+            return redirect(url_for('admin.ver_solicitudes_archivo'))
+            
+        except Exception as e:
+            db.session.rollback()
+            log_error(f"Error al enviar archivo: {str(e)}")
+            flash(f'Error al enviar archivo: {str(e)}', 'danger')
+            return redirect(url_for('admin.responder_solicitud_archivo', solicitud_id=solicitud_id))
+    
+    return render_template('admin/responder_solicitud.html', solicitud=solicitud)
+
+@admin_bp.route('/enviar-archivo-directo', methods=['GET', 'POST'])
+@require_profesor
+def enviar_archivo_directo():
+    """Enviar archivo a un alumno sin que lo haya solicitado"""
+    
+    if request.method == 'POST':
+        alumno_id = request.form.get('alumno_id')
+        titulo = request.form.get('titulo')
+        mensaje = request.form.get('mensaje', '')
+        archivo = request.files.get('archivo')
+        
+        if not alumno_id or not titulo or not archivo:
+            flash('Debe completar todos los campos obligatorios', 'danger')
+            return redirect(url_for('admin.enviar_archivo_directo'))
+        
+        # Validar que sea PDF
+        if not archivo.filename.lower().endswith('.pdf'):
+            flash('Solo se permiten archivos PDF', 'danger')
+            return redirect(url_for('admin.enviar_archivo_directo'))
+        
+        try:
+            alumno = UsuarioAlumno.query.get(alumno_id)
+            if not alumno:
+                flash('Alumno no encontrado', 'danger')
+                return redirect(url_for('admin.enviar_archivo_directo'))
+            
+            # Validar archivo
+            file_stream = BytesIO(archivo.read())
+            validator = FileValidator()
+            validator.validate(file_stream, archivo.filename)
+            
+            # Guardar archivo
+            nombre_archivo = secure_filename(archivo.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            nombre_archivo = f"{timestamp}_{nombre_archivo}"
+            
+            # Subir a S3 o guardar localmente
+            if s3_manager.is_configured:
+                key_s3 = f"archivos_enviados/{alumno.grado_grupo}/{nombre_archivo}"
+                archivo_url = s3_manager.upload_file(file_stream, key_s3, 'application/pdf')
+                archivo_url = key_s3
+            else:
+                # Guardar localmente
+                ruta_local = os.path.join('uploads', 'archivos_enviados')
+                os.makedirs(ruta_local, exist_ok=True)
+                archivo_path = os.path.join(ruta_local, nombre_archivo)
+                file_stream.seek(0)
+                with open(archivo_path, 'wb') as f:
+                    f.write(file_stream.read())
+                archivo_url = f"archivos_enviados/{nombre_archivo}"
+            
+            # Crear registro de archivo enviado (sin solicitud)
+            archivo_enviado = ArchivoEnviado(
+                alumno_id=alumno_id,
+                solicitud_id=None,  # No hay solicitud
+                titulo=titulo,
+                mensaje=mensaje,
+                archivo_url=archivo_url,
+                nombre_archivo=nombre_archivo,
+                enviado_por=session.get('user', 'Profesor')
+            )
+            
+            db.session.add(archivo_enviado)
+            db.session.commit()
+            
+            flash(f'✅ Archivo enviado correctamente a {alumno.nombre_completo}', 'success')
+            return redirect(url_for('admin.enviar_archivo_directo'))
+            
+        except Exception as e:
+            db.session.rollback()
+            log_error(f"Error al enviar archivo: {str(e)}")
+            flash(f'Error al enviar archivo: {str(e)}', 'danger')
+            return redirect(url_for('admin.enviar_archivo_directo'))
+    
+    # GET - Mostrar formulario
+    alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
+    return render_template('admin/enviar_archivo_directo.html', alumnos=alumnos)
+
+@admin_bp.route('/archivos-enviados')
+@require_profesor
+def ver_archivos_enviados():
+    """Ver historial de todos los archivos enviados"""
+    filtro_alumno = request.args.get('alumno', 'todos')
+    
+    query = ArchivoEnviado.query.join(UsuarioAlumno)
+    
+    if filtro_alumno != 'todos':
+        query = query.filter(ArchivoEnviado.alumno_id == filtro_alumno)
+    
+    archivos = query.order_by(ArchivoEnviado.fecha_envio.desc()).all()
+    alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.nombre_completo).all()
+    
+    return render_template('admin/archivos_enviados.html',
+                         archivos=archivos,
+                         alumnos=alumnos,
+                         filtro_alumno=filtro_alumno)
+
+# =============================================================================
+# ENCUESTAS DE RETROALIMENTACIÓN
+# =============================================================================
+
+@admin_bp.route('/encuestas')
+@require_profesor
+def gestionar_encuestas():
+    """Ver todas las encuestas creadas"""
+    encuestas = Encuesta.query.order_by(Encuesta.fecha_creacion.desc()).all()
+    
+    # Calcular estadísticas para cada encuesta
+    for encuesta in encuestas:
+        encuesta.total_respuestas_count = encuesta.total_respuestas()
+        
+        # Calcular promedio general si hay respuestas
+        if encuesta.total_respuestas_count > 0:
+            respuestas = RespuestaEncuesta.query.filter_by(encuesta_id=encuesta.id).all()
+            promedios = [r.promedio_respuestas() for r in respuestas]
+            encuesta.promedio_general = sum(promedios) / len(promedios)
+        else:
+            encuesta.promedio_general = 0
+    
+    return render_template('admin/encuestas.html', encuestas=encuestas)
+
+
+@admin_bp.route('/encuestas/crear', methods=['GET', 'POST'])
+@require_profesor
+def crear_encuesta():
+    """Crear nueva encuesta"""
+    if request.method == 'POST':
+        try:
+            titulo = request.form.get('titulo', '').strip()
+            descripcion = request.form.get('descripcion', '').strip()
+            grupos = request.form.getlist('grupos')  # Lista de grupos seleccionados
+            fecha_cierre = request.form.get('fecha_cierre', '').strip()
+            obligatoria = request.form.get('obligatoria') == 'on'
+            
+            if not titulo:
+                flash('El título es obligatorio', 'warning')
+                return redirect(url_for('admin.crear_encuesta'))
+            
+            # Procesar grupos destino
+            if 'todos' in grupos:
+                grupos_destino = 'todos'
+            else:
+                grupos_destino = ','.join(grupos)
+            
+            if not grupos_destino:
+                flash('Debes seleccionar al menos un grupo', 'warning')
+                return redirect(url_for('admin.crear_encuesta'))
+            
+            # Convertir fecha de cierre
+            fecha_cierre_dt = None
+            if fecha_cierre:
+                try:
+                    fecha_cierre_dt = datetime.strptime(fecha_cierre, '%Y-%m-%d')
+                except:
+                    pass
+            
+            # Crear encuesta
+            nueva_encuesta = Encuesta(
+                titulo=titulo,
+                descripcion=descripcion,
+                grupos_destino=grupos_destino,
+                activa=True,
+                obligatoria=obligatoria,
+                fecha_cierre=fecha_cierre_dt,
+                creado_por=session.get('user', 'Admin')
+            )
+            
+            db.session.add(nueva_encuesta)
+            db.session.commit()
+            
+            flash(f'✅ Encuesta "{titulo}" creada y enviada correctamente', 'success')
+            return redirect(url_for('admin.gestionar_encuestas'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al crear encuesta: {str(e)}', 'danger')
+            return redirect(url_for('admin.crear_encuesta'))
+    
+    # GET - Mostrar formulario
+    # Obtener lista de grupos únicos
+    grupos_unicos = db.session.query(UsuarioAlumno.grado_grupo)\
+        .filter_by(activo=True)\
+        .distinct()\
+        .order_by(UsuarioAlumno.grado_grupo)\
+        .all()
+    grupos = [g[0] for g in grupos_unicos]
+    
+    return render_template('admin/crear_encuesta.html', grupos=grupos)
+
+
+@admin_bp.route('/encuestas/<int:encuesta_id>/resultados')
+@require_profesor
+def ver_resultados_encuesta(encuesta_id):
+    """Ver resultados detallados de una encuesta"""
+    encuesta = Encuesta.query.get_or_404(encuesta_id)
+    respuestas = RespuestaEncuesta.query.filter_by(encuesta_id=encuesta_id)\
+        .order_by(RespuestaEncuesta.fecha_respuesta.desc()).all()
+    
+    # Calcular estadísticas
+    stats = {
+        'total_respuestas': len(respuestas),
+        'promedio_clases': 0,
+        'promedio_aprendizaje': 0,
+        'promedio_maestro': 0,
+        'promedio_contenido': 0,
+        'promedio_dificultad': 0,
+        'promedio_general': 0
+    }
+    
+    if respuestas:
+        stats['promedio_clases'] = sum(r.pregunta1_clases for r in respuestas) / len(respuestas)
+        stats['promedio_aprendizaje'] = sum(r.pregunta2_aprendizaje for r in respuestas) / len(respuestas)
+        stats['promedio_maestro'] = sum(r.pregunta3_maestro for r in respuestas) / len(respuestas)
+        stats['promedio_contenido'] = sum(r.pregunta4_contenido for r in respuestas) / len(respuestas)
+        stats['promedio_dificultad'] = sum(r.pregunta5_dificultad for r in respuestas) / len(respuestas)
+        
+        # Promedio general
+        promedios = [r.promedio_respuestas() for r in respuestas]
+        stats['promedio_general'] = sum(promedios) / len(promedios)
+    
+    # Agrupar comentarios
+    comentarios_positivos = [r for r in respuestas if r.comentario_positivo]
+    comentarios_mejora = [r for r in respuestas if r.comentario_mejora]
+    comentarios_adicionales = [r for r in respuestas if r.comentario_adicional]
+    
+    return render_template('admin/resultados_encuesta.html',
+                         encuesta=encuesta,
+                         respuestas=respuestas,
+                         stats=stats,
+                         comentarios_positivos=comentarios_positivos,
+                         comentarios_mejora=comentarios_mejora,
+                         comentarios_adicionales=comentarios_adicionales)
+
+
+@admin_bp.route('/encuestas/<int:encuesta_id>/toggle')
+@require_profesor
+def toggle_encuesta(encuesta_id):
+    """Activar/desactivar una encuesta"""
+    encuesta = Encuesta.query.get_or_404(encuesta_id)
+    encuesta.activa = not encuesta.activa
+    db.session.commit()
+    
+    estado = "activada" if encuesta.activa else "desactivada"
+    flash(f'Encuesta {estado} correctamente', 'success')
+    return redirect(url_for('admin.gestionar_encuestas'))
+
+
+@admin_bp.route('/encuestas/<int:encuesta_id>/eliminar')
+@require_profesor
+def eliminar_encuesta(encuesta_id):
+    """Eliminar una encuesta y todas sus respuestas"""
+    encuesta = Encuesta.query.get_or_404(encuesta_id)
+    titulo = encuesta.titulo
+    
+    db.session.delete(encuesta)
+    db.session.commit()
+    
+    flash(f'Encuesta "{titulo}" eliminada correctamente', 'success')
+    return redirect(url_for('admin.gestionar_encuestas'))
+
+# --- API PARA NOTIFICACIONES ---
+@admin_bp.route('/api/solicitudes-pendientes/cantidad')  # ✅ Agregué /api/
+@require_profesor
+def cantidad_solicitudes_pendientes():
+    cantidad = SolicitudArchivo.query.filter_by(estado='pendiente').count()
+    return jsonify({'cantidad': cantidad})

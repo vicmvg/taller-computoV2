@@ -711,7 +711,8 @@
                 const input = document.getElementById('inputMensaje');
                 const aviso = document.getElementById('avisoBloqueo');
                 
-                // Manejo del bloqueo
+                // ✅ CORRECTO - VERIFICACIÓN EXPLÍCITA DEL CAMPO 'activo'
+                // Manejo del bloqueo - IMPORTANTE: Verifica el campo 'activo'
                 if (!datos.activo) {
                     input.disabled = true;
                     input.placeholder = "Chat desactivado";

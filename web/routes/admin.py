@@ -830,12 +830,15 @@ def toggle_chat():
     
     if config.valor == 'True':
         config.valor = 'False'
-        flash('Chat desactivado para todos los alumnos.', 'secondary')
+        mensaje = 'Chat desactivado para todos los alumnos.'
+        tipo = 'secondary'
     else:
         config.valor = 'True'
-        flash('Chat activado. Los alumnos pueden conversar.', 'success')
+        mensaje = 'Chat activado. Los alumnos pueden conversar.'
+        tipo = 'success'
     
     db.session.commit()
+    flash(mensaje, tipo)
     return redirect(url_for('admin.dashboard'))
 
 # --- MENSAJES FLOTANTES ---

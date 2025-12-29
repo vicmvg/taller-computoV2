@@ -333,3 +333,37 @@ class RespuestaEncuesta(db.Model):
             self.pregunta5_dificultad
         ]
         return sum(respuestas) / len(respuestas)
+class LibroDigital(db.Model):
+    """Libros y documentos de la biblioteca digital"""
+    __tablename__ = 'libros_digitales'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Información básica
+    titulo = db.Column(db.String(200), nullable=False)
+    descripcion = db.Column(db.Text, nullable=False)
+    autor = db.Column(db.String(100), nullable=True)
+    
+    # Categoría
+    categoria = db.Column(db.String(50), nullable=False)
+    
+    # Archivos
+    archivo_pdf_url = db.Column(db.String(500), nullable=False)
+    miniatura_url = db.Column(db.String(500), nullable=True)
+    
+    # Metadatos
+    fecha_publicacion = db.Column(db.DateTime, default=datetime.utcnow)
+    publicado_por = db.Column(db.String(100), nullable=False)
+    vistas = db.Column(db.Integer, default=0)
+    descargas = db.Column(db.Integer, default=0)
+    activo = db.Column(db.Boolean, default=True)
+    
+    def incrementar_vistas(self):
+        """Incrementa el contador de vistas"""
+        self.vistas += 1
+        db.session.commit()
+    
+    def incrementar_descargas(self):
+        """Incrementa el contador de descargas"""
+        self.descargas += 1
+        db.session.commit()

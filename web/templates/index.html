@@ -14,7 +14,7 @@
     .anuncio-card {
         background: white;
         border-radius: 12px;
-        border-left: 5px solid #d97706; /* Ámbar elegante (no amarillo pollo) */
+        border-left: 5px solid #d97706;
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
         transition: transform 0.2s;
     }
@@ -25,7 +25,7 @@
     }
 
     .anuncio-icon {
-        background-color: #fffbeb; /* Fondo crema muy suave */
+        background-color: #fffbeb;
         color: #d97706;
         width: 48px;
         height: 48px;
@@ -33,6 +33,70 @@
         align-items: center;
         justify-content: center;
         border-radius: 10px;
+    }
+
+    /* 📚 Estilos para la biblioteca */
+    .libro-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        height: 100%;
+        border-radius: 12px;
+        overflow: hidden;
+        background: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .libro-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+    }
+
+    .libro-miniatura {
+        height: 220px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .libro-miniatura img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .libro-miniatura .libro-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+    }
+
+    .libro-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+
+    /* 📖 Estilo para truncar descripción de libros */
+    .libro-descripcion {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* Propiedades estándar para compatibilidad futura */
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        /* Propiedad estándar */
+        line-clamp: 3;
+        /* Fallback para navegadores antiguos */
+        max-height: 4.5em; /* Aproximadamente 3 líneas */
     }
 </style>
 
@@ -103,9 +167,14 @@
             </div>
         </div>
         {% endif %}
+        
+        <!-- 🆕 TABS CON BIBLIOTECA AGREGADA -->
         <div class="custom-tabs mt-5">
             <button class="tab-btn active" onclick="showTab('horarios')">
                 <i class="fas fa-clock me-2"></i>Horarios
+            </button>
+            <button class="tab-btn" onclick="showTab('biblioteca')">
+                <i class="fas fa-book me-2"></i>Biblioteca
             </button>
             <button class="tab-btn" onclick="showTab('recursos')">
                 <i class="fas fa-download me-2"></i>Recursos
@@ -149,6 +218,74 @@
             </div>
         </div>
 
+        <!-- 🆕 NUEVA SECCIÓN: BIBLIOTECA DIGITAL -->
+        <div id="biblioteca" class="tab-content-custom">
+            {% if libros_biblioteca %}
+            <div class="row g-4">
+                {% for libro in libros_biblioteca %}
+                <div class="col-md-6 col-lg-4">
+                    <div class="libro-card">
+                        <!-- Miniatura -->
+                        <div class="libro-miniatura">
+                            {% if libro.miniatura_url %}
+                            <img src="{{ url_for('ver_archivo', archivo_path=libro.miniatura_url) }}" 
+                                 alt="{{ libro.titulo }}">
+                            {% else %}
+                            <div class="libro-placeholder">
+                                <i class="fas fa-book fa-5x text-white opacity-50"></i>
+                            </div>
+                            {% endif %}
+                            <span class="libro-badge">{{ libro.categoria }}</span>
+                        </div>
+
+                        <!-- Contenido -->
+                        <div class="p-4">
+                            <h5 class="fw-bold mb-2">{{ libro.titulo }}</h5>
+                            {% if libro.autor %}
+                            <p class="text-muted small mb-2">
+                                <i class="fas fa-user me-1"></i>{{ libro.autor }}
+                            </p>
+                            {% endif %}
+                            <p class="text-muted small mb-3 libro-descripcion">
+                                {{ libro.descripcion }}
+                            </p>
+
+                            <!-- Estadísticas -->
+                            <div class="d-flex gap-3 mb-3 small text-muted">
+                                <span>
+                                    <i class="fas fa-eye me-1"></i>{{ libro.vistas }}
+                                </span>
+                                <span>
+                                    <i class="fas fa-download me-1"></i>{{ libro.descargas }}
+                                </span>
+                            </div>
+
+                            <!-- Botones -->
+                            <div class="d-flex gap-2">
+                                <a href="{{ url_for('ver_libro', libro_id=libro.id) }}" 
+                                   target="_blank"
+                                   class="btn btn-primary btn-sm flex-grow-1">
+                                    <i class="fas fa-book-open me-1"></i>Leer
+                                </a>
+                                <a href="{{ url_for('descargar_libro', libro_id=libro.id) }}" 
+                                   class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="glass-card text-center py-5">
+                <i class="fas fa-book-open fa-5x text-muted opacity-25 mb-4"></i>
+                <h5 class="text-muted mb-3">Biblioteca en construcción</h5>
+                <p class="text-muted">Pronto habrá libros y documentos disponibles</p>
+            </div>
+            {% endif %}
+        </div>
+
         <div id="recursos" class="tab-content-custom">
             <div class="row g-4">
                 {% if recursos %}
@@ -167,7 +304,6 @@
                             
                             <h5 class="fw-bold mb-3">{{ r.titulo }}</h5>
                             
-                            <!-- ACTUALIZADO: Usar la nueva ruta ver_archivo -->
                             <a href="{{ url_for('ver_archivo', archivo_path=r.archivo_url) }}" target="_blank" class="btn btn-outline-primary rounded-pill px-4">
                                 Ver / Descargar <i class="fas fa-download ms-2"></i>
                             </a>

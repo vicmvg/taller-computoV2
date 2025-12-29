@@ -1,0 +1,112 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            
+            <!-- Header -->
+            <div class="mb-4">
+                <a href="{{ url_for('admin.gestionar_biblioteca') }}" class="text-decoration-none text-muted mb-3 d-inline-block">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a biblioteca
+                </a>
+                <h2 class="fw-bold">
+                    <i class="fas fa-plus-circle me-2"></i>Agregar Libro
+                </h2>
+                <p class="text-muted">Sube un PDF con su información</p>
+            </div>
+
+            <!-- Formulario -->
+            <div class="glass-card p-4">
+                <form action="{{ url_for('admin.agregar_libro') }}" method="POST" enctype="multipart/form-data">
+                    
+                    <!-- Información básica -->
+                    <h5 class="fw-bold mb-3 pb-2 border-bottom">
+                        <i class="fas fa-info-circle me-2 text-primary"></i>Información Básica
+                    </h5>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Título del Libro *</label>
+                        <input type="text" class="form-control" name="titulo" required
+                               placeholder="Ej: Introducción a Python">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Descripción *</label>
+                        <textarea class="form-control" name="descripcion" rows="4" required
+                                  placeholder="Describe brevemente de qué trata el libro..."></textarea>
+                        <div class="form-text">Esta descripción aparecerá en la tarjeta del libro</div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Autor</label>
+                            <input type="text" class="form-control" name="autor"
+                                   placeholder="Ej: Juan Pérez (Opcional)">
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Categoría *</label>
+                            <select class="form-select" name="categoria" required>
+                                <option value="">Selecciona una categoría</option>
+                                {% for cat in categorias %}
+                                <option value="{{ cat }}">{{ cat }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Archivos -->
+                    <h5 class="fw-bold mb-3 pb-2 border-bottom">
+                        <i class="fas fa-file-upload me-2 text-success"></i>Archivos
+                    </h5>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">
+                            Archivo PDF * 
+                            <span class="badge bg-danger">Obligatorio</span>
+                        </label>
+                        <input type="file" class="form-control" name="archivo_pdf" 
+                               accept=".pdf" required>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Solo archivos PDF. Máximo 50MB.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            Imagen Miniatura
+                            <span class="badge bg-secondary">Opcional</span>
+                        </label>
+                        <input type="file" class="form-control" name="miniatura" 
+                               accept="image/*">
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Imagen que aparecerá como portada (PNG, JPG, WEBP). Si no subes una, se mostrará un ícono por defecto.
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info border-0 mb-4">
+                        <i class="fas fa-lightbulb me-2"></i>
+                        <strong>Tip:</strong> Para obtener mejores resultados, usa una imagen de 400x300 px para la miniatura.
+                    </div>
+
+                    <!-- Botones -->
+                    <div class="d-flex gap-2 justify-content-end">
+                        <a href="{{ url_for('admin.gestionar_biblioteca') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-times me-2"></i>Cancelar
+                        </a>
+                        <button type="submit" class="btn btn-primary px-4">
+                            <i class="fas fa-save me-2"></i>Guardar Libro
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

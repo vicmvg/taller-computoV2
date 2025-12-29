@@ -5,7 +5,7 @@ from web.models import (Equipo, Mantenimiento, Anuncio, UsuarioAlumno,
                         ArchivoEnviado, ReporteAsistencia, ActividadGrado, Cuestionario,
                         BancoCuestionario, Horario, Plataforma, Mensaje, MensajeFlotante,
                         MensajeLeido, Configuracion, Recurso, CriterioBoleta, BoletaGenerada,
-                        Encuesta, RespuestaEncuesta)  # ✅ Agregué Encuesta y RespuestaEncuesta aquí
+                        Encuesta, RespuestaEncuesta, LibroDigital)  # ✅ Agregué LibroDigital aquí
 from web.extensions import db
 from web.utils import require_profesor, s3_manager, guardar_archivo, generar_qr_img, log_error, log_info, generar_pdf_boleta, descargar_archivo, FileValidator
 from datetime import datetime, timedelta, date  # ✅ Agregué 'date' aquí
@@ -1805,3 +1805,196 @@ def eliminar_encuesta(encuesta_id):
 def cantidad_solicitudes_pendientes():
     cantidad = SolicitudArchivo.query.filter_by(estado='pendiente').count()
     return jsonify({'cantidad': cantidad})
+
+# ============================================================================= 
+# RUTAS PARA BIBLIOTECA DIGITAL - Agregadas al final de admin.py
+# =============================================================================
+
+@admin_bp.route('/biblioteca')
+@require_profesor
+def gestionar_biblioteca():
+    """Ver todos los libros de la biblioteca"""
+    filtro_categoria = request.args.get('categoria', 'todos')
+    
+    query = LibroDigital.query
+    
+    if filtro_categoria != 'todos':
+        query = query.filter_by(categoria=filtro_categoria)
+    
+    libros = query.order_by(LibroDigital.fecha_publicacion.desc()).all()
+    
+    # Calcular estadísticas
+    total_libros = LibroDigital.query.filter_by(activo=True).count()
+    total_vistas = db.session.query(db.func.sum(LibroDigital.vistas)).scalar() or 0
+    total_descargas = db.session.query(db.func.sum(LibroDigital.descargas)).scalar() or 0
+    
+    categorias_disponibles = ['Tutoriales', 'Lecturas', 'Programación', 'Ofimática', 'Internet', 'General']
+    
+    return render_template('admin/biblioteca.html', 
+                         libros=libros, 
+                         categorias=categorias_disponibles,
+                         filtro_actual=filtro_categoria,
+                         total_libros=total_libros,
+                         total_vistas=total_vistas,
+                         total_descargas=total_descargas)
+
+
+@admin_bp.route('/biblioteca/agregar', methods=['GET', 'POST'])
+@require_profesor
+def agregar_libro():
+    """Agregar nuevo libro a la biblioteca"""
+    if request.method == 'POST':
+        try:
+            titulo = request.form.get('titulo', '').strip()
+            descripcion = request.form.get('descripcion', '').strip()
+            autor = request.form.get('autor', '').strip()
+            categoria = request.form.get('categoria', '').strip()
+            
+            archivo_pdf = request.files.get('archivo_pdf')
+            miniatura = request.files.get('miniatura')
+            
+            if not titulo or not descripcion or not categoria:
+                flash('Título, descripción y categoría son obligatorios', 'warning')
+                return redirect(url_for('admin.agregar_libro'))
+            
+            if not archivo_pdf or not archivo_pdf.filename:
+                flash('Debes subir un archivo PDF', 'warning')
+                return redirect(url_for('admin.agregar_libro'))
+            
+            # Validar que sea PDF
+            if not archivo_pdf.filename.lower().endswith('.pdf'):
+                flash('Solo se permiten archivos PDF', 'danger')
+                return redirect(url_for('admin.agregar_libro'))
+            
+            # Guardar PDF en S3
+            from io import BytesIO
+            from werkzeug.utils import secure_filename
+            
+            pdf_stream = BytesIO(archivo_pdf.read())
+            nombre_pdf = secure_filename(archivo_pdf.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            nombre_pdf = f"biblioteca_{timestamp}_{nombre_pdf}"
+            
+            if s3_manager.is_configured:
+                key_pdf = f"biblioteca/{nombre_pdf}"
+                s3_manager.upload_file(pdf_stream, key_pdf, 'application/pdf')
+                pdf_url = key_pdf
+            else:
+                # Guardar localmente si S3 no está configurado
+                ruta_local = os.path.join(current_app.config.get('UPLOAD_FOLDER', 'uploads'), 'biblioteca')
+                os.makedirs(ruta_local, exist_ok=True)
+                pdf_path = os.path.join(ruta_local, nombre_pdf)
+                pdf_stream.seek(0)
+                with open(pdf_path, 'wb') as f:
+                    f.write(pdf_stream.read())
+                pdf_url = f"biblioteca/{nombre_pdf}"
+            
+            # Guardar miniatura (opcional)
+            miniatura_url = None
+            if miniatura and miniatura.filename:
+                if miniatura.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+                    mini_stream = BytesIO(miniatura.read())
+                    nombre_mini = secure_filename(miniatura.filename)
+                    nombre_mini = f"mini_{timestamp}_{nombre_mini}"
+                    
+                    if s3_manager.is_configured:
+                        key_mini = f"biblioteca/miniaturas/{nombre_mini}"
+                        s3_manager.upload_file(mini_stream, key_mini, miniatura.content_type)
+                        miniatura_url = key_mini
+                    else:
+                        ruta_mini = os.path.join(current_app.config.get('UPLOAD_FOLDER', 'uploads'), 'biblioteca', 'miniaturas')
+                        os.makedirs(ruta_mini, exist_ok=True)
+                        mini_path = os.path.join(ruta_mini, nombre_mini)
+                        mini_stream.seek(0)
+                        with open(mini_path, 'wb') as f:
+                            f.write(mini_stream.read())
+                        miniatura_url = f"biblioteca/miniaturas/{nombre_mini}"
+            
+            # Crear registro en BD
+            nuevo_libro = LibroDigital(
+                titulo=titulo,
+                descripcion=descripcion,
+                autor=autor if autor else None,
+                categoria=categoria,
+                archivo_pdf_url=pdf_url,
+                miniatura_url=miniatura_url,
+                publicado_por=session.get('user', 'Admin')
+            )
+            
+            db.session.add(nuevo_libro)
+            db.session.commit()
+            
+            flash(f'✅ Libro "{titulo}" agregado a la biblioteca', 'success')
+            return redirect(url_for('admin.gestionar_biblioteca'))
+            
+        except Exception as e:
+            db.session.rollback()
+            log_error(f"Error al agregar libro: {str(e)}")
+            flash(f'Error al agregar libro: {str(e)}', 'danger')
+            return redirect(url_for('admin.agregar_libro'))
+    
+    # GET - Mostrar formulario
+    categorias = ['Tutoriales', 'Lecturas', 'Programación', 'Ofimática', 'Internet', 'General']
+    return render_template('admin/agregar_libro.html', categorias=categorias)
+
+
+@admin_bp.route('/biblioteca/<int:id>/editar', methods=['GET', 'POST'])
+@require_profesor
+def editar_libro(id):
+    """Editar información de un libro"""
+    libro = LibroDigital.query.get_or_404(id)
+    
+    if request.method == 'POST':
+        try:
+            libro.titulo = request.form.get('titulo', '').strip()
+            libro.descripcion = request.form.get('descripcion', '').strip()
+            libro.autor = request.form.get('autor', '').strip()
+            libro.categoria = request.form.get('categoria', '').strip()
+            
+            db.session.commit()
+            flash('Libro actualizado correctamente', 'success')
+            return redirect(url_for('admin.gestionar_biblioteca'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al actualizar: {str(e)}', 'danger')
+    
+    categorias = ['Tutoriales', 'Lecturas', 'Programación', 'Ofimática', 'Internet', 'General']
+    return render_template('admin/editar_libro.html', libro=libro, categorias=categorias)
+
+
+@admin_bp.route('/biblioteca/<int:id>/toggle')
+@require_profesor
+def toggle_libro(id):
+    """Activar/desactivar un libro"""
+    libro = LibroDigital.query.get_or_404(id)
+    libro.activo = not libro.activo
+    db.session.commit()
+    
+    estado = "activado" if libro.activo else "desactivado"
+    flash(f'Libro {estado} correctamente', 'success')
+    return redirect(url_for('admin.gestionar_biblioteca'))
+
+
+@admin_bp.route('/biblioteca/<int:id>/eliminar')
+@require_profesor
+def eliminar_libro(id):
+    """Eliminar un libro de la biblioteca"""
+    libro = LibroDigital.query.get_or_404(id)
+    titulo = libro.titulo
+    
+    # Eliminar archivos de S3
+    try:
+        if s3_manager.is_configured:
+            if libro.archivo_pdf_url:
+                s3_manager.delete_file(libro.archivo_pdf_url)
+            if libro.miniatura_url:
+                s3_manager.delete_file(libro.miniatura_url)
+    except Exception as e:
+        log_error(f"Error al eliminar archivos S3: {str(e)}")
+    
+    db.session.delete(libro)
+    db.session.commit()
+    
+    flash(f'Libro "{titulo}" eliminado correctamente', 'success')
+    return redirect(url_for('admin.gestionar_biblioteca'))

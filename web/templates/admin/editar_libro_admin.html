@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            
+            <!-- Header -->
+            <div class="mb-4">
+                <a href="{{ url_for('admin.gestionar_biblioteca') }}" class="text-decoration-none text-muted mb-3 d-inline-block">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a biblioteca
+                </a>
+                <h2 class="fw-bold">
+                    <i class="fas fa-edit me-2"></i>Editar Libro
+                </h2>
+                <p class="text-muted">{{ libro.titulo }}</p>
+            </div>
+
+            <!-- Formulario -->
+            <div class="glass-card p-4">
+                <form action="{{ url_for('admin.editar_libro', id=libro.id) }}" method="POST">
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Título del Libro</label>
+                        <input type="text" class="form-control" name="titulo" 
+                               value="{{ libro.titulo }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Descripción</label>
+                        <textarea class="form-control" name="descripcion" rows="4" required>{{ libro.descripcion }}</textarea>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Autor</label>
+                            <input type="text" class="form-control" name="autor"
+                                   value="{{ libro.autor or '' }}">
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Categoría</label>
+                            <select class="form-select" name="categoria" required>
+                                {% for cat in categorias %}
+                                <option value="{{ cat }}" {{ 'selected' if libro.categoria == cat else '' }}>
+                                    {{ cat }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-warning border-0">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Nota:</strong> Para cambiar el PDF o la miniatura, deberás eliminar el libro y crear uno nuevo.
+                    </div>
+
+                    <!-- Botones -->
+                    <div class="d-flex gap-2 justify-content-end">
+                        <a href="{{ url_for('admin.gestionar_biblioteca') }}" class="btn btn-outline-secondary">
+                            Cancelar
+                        </a>
+                        <button type="submit" class="btn btn-primary px-4">
+                            <i class="fas fa-save me-2"></i>Guardar Cambios
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

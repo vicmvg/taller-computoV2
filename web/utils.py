@@ -90,7 +90,7 @@ def require_any_auth(f):
 
 # --- CLASES DE APOYO ---
 class S3Manager:
-    """Gestor centralizado para operaciones S3"""
+    """Gestor centralizado para operaciones S3 / iDrive e2"""
     
     def __init__(self, app_config=None):
         self.endpoint = os.environ.get('S3_ENDPOINT')
@@ -154,6 +154,37 @@ class S3Manager:
         except Exception as e:
             log_error(f"Error S3 delete: {str(e)}")
             raise S3UploadError(f"Error al eliminar de S3: {str(e)}")
+    
+    # 🆕 NUEVA FUNCIÓN: Generar URLs firmadas para iDrive e2
+    def generate_presigned_url(self, key, expiration=3600):
+        """
+        Generar URL firmada (presigned URL) para acceso temporal a archivos privados
+        
+        Args:
+            key: La clave/path del archivo en S3
+            expiration: Tiempo de expiración en segundos (default: 3600 = 1 hora)
+        
+        Returns:
+            URL firmada temporal que permite acceso al archivo privado
+        """
+        try:
+            client = self.get_client()
+            
+            url = client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': self.bucket,
+                    'Key': key
+                },
+                ExpiresIn=expiration
+            )
+            
+            log_info(f"URL firmada generada para: {key} (expira en {expiration}s)")
+            return url
+            
+        except Exception as e:
+            log_error(f"Error al generar URL firmada: {str(e)}")
+            raise S3UploadError(f"Error al generar URL firmada: {str(e)}")
 
 class FileValidator:
     """Validador de archivos centralizado"""

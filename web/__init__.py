@@ -54,84 +54,55 @@ def create_app():
         actividad = ActividadGrado.query.filter_by(grado=numero_grado).first()
         return render_template('publico/ver_grado.html', grado=numero_grado, actividad=actividad)
     
-    # 7. RUTA PARA VER ARCHIVOS PÚBLICOS (recursos del index)
+    # 7. 🆕 RUTA PARA VER ARCHIVOS CON URLs FIRMADAS (iDrive e2)
     @app.route('/ver-archivo/<path:archivo_path>')
     def ver_archivo(archivo_path):
-        """Permite ver/descargar archivos públicos (recursos)"""
+        """Permite ver/descargar archivos con URLs firmadas para iDrive e2"""
         try:
-            # Si es una ruta de S3 completa
-            if archivo_path.startswith('uploads/'):
-                if s3_manager.is_configured:
-                    file_stream, content_type = s3_manager.download_file(archivo_path)
+            # Si S3 está configurado (iDrive e2)
+            if s3_manager.is_configured:
+                try:
+                    # Generar URL firmada válida por 1 hora
+                    url_firmada = s3_manager.generate_presigned_url(archivo_path, expiration=3600)
                     
-                    if file_stream:
-                        filename = archivo_path.split('/')[-1]
-                        
-                        return send_file(
-                            file_stream,
-                            mimetype=content_type,
-                            as_attachment=False,
-                            download_name=filename
-                        )
-                else:
-                    # Archivo local
-                    filename = archivo_path.replace('uploads/', '')
-                    file_path = os.path.join('uploads', filename)
+                    # Redirigir a la URL firmada
+                    return redirect(url_firmada)
                     
-                    if os.path.exists(file_path):
-                        # Determinar mimetype
-                        if filename.endswith('.pdf'):
-                            mimetype = 'application/pdf'
-                        elif filename.endswith(('.doc', '.docx')):
-                            mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                        elif filename.endswith(('.jpg', '.jpeg')):
-                            mimetype = 'image/jpeg'
-                        elif filename.endswith('.png'):
-                            mimetype = 'image/png'
-                        elif filename.endswith('.gif'):
-                            mimetype = 'image/gif'
-                        elif filename.endswith('.webp'):
-                            mimetype = 'image/webp'
-                        else:
-                            mimetype = 'application/octet-stream'
-                        
-                        return send_file(
-                            file_path,
-                            mimetype=mimetype,
-                            as_attachment=False,
-                            download_name=filename
-                        )
+                except Exception as e:
+                    log_error(f"Error al generar URL firmada: {str(e)}")
+                    flash('Error al acceder al archivo', 'danger')
+                    return redirect(url_for('index'))
             else:
-                # Archivo local sin prefijo uploads/
-                filename = archivo_path
-                file_path = os.path.join('uploads', filename)
+                # Fallback: archivos locales
+                if archivo_path.startswith('uploads/'):
+                    archivo_path = archivo_path.replace('uploads/', '')
                 
-                if os.path.exists(file_path):
-                    # Determinar mimetype
-                    if filename.endswith('.pdf'):
-                        mimetype = 'application/pdf'
-                    elif filename.endswith(('.doc', '.docx')):
-                        mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                    elif filename.endswith(('.jpg', '.jpeg')):
-                        mimetype = 'image/jpeg'
-                    elif filename.endswith('.png'):
-                        mimetype = 'image/png'
-                    elif filename.endswith('.gif'):
-                        mimetype = 'image/gif'
-                    elif filename.endswith('.webp'):
-                        mimetype = 'image/webp'
-                    else:
-                        mimetype = 'application/octet-stream'
-                    
-                    return send_file(
-                        file_path,
-                        mimetype=mimetype,
-                        as_attachment=False,
-                        download_name=filename
-                    )
-                else:
+                file_path = os.path.join('uploads', archivo_path)
+                
+                if not os.path.exists(file_path):
                     return "Archivo no encontrado", 404
-                    
+                
+                # Determinar mimetype
+                ext = archivo_path.split('.')[-1].lower()
+                mimetype_map = {
+                    'pdf': 'application/pdf',
+                    'jpg': 'image/jpeg',
+                    'jpeg': 'image/jpeg',
+                    'png': 'image/png',
+                    'gif': 'image/gif',
+                    'webp': 'image/webp',
+                    'doc': 'application/msword',
+                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                }
+                mimetype = mimetype_map.get(ext, 'application/octet-stream')
+                
+                return send_file(
+                    file_path,
+                    mimetype=mimetype,
+                    as_attachment=False,
+                    download_name=os.path.basename(file_path)
+                )
+                        
         except Exception as e:
             log_error(f"Error al servir archivo: {str(e)}")
             return f"Error al cargar archivo: {str(e)}", 500
@@ -149,7 +120,7 @@ def create_app():
         # Incrementar vistas
         libro.incrementar_vistas()
         
-        # Redirigir al PDF
+        # Redirigir a la URL firmada del PDF
         return redirect(url_for('ver_archivo', archivo_path=libro.archivo_pdf_url))
 
     # 9. 📥 RUTA PARA DESCARGAR UN LIBRO (incrementa contador de descargas)
@@ -168,28 +139,35 @@ def create_app():
         # Descargar el PDF
         try:
             if s3_manager.is_configured:
-                # Descargar de S3
-                file_stream, content_type = s3_manager.download_file(libro.archivo_pdf_url)
-                if file_stream:
-                    return send_file(
-                        file_stream,
-                        mimetype='application/pdf',
-                        as_attachment=True,
-                        download_name=f"{libro.titulo}.pdf"
-                    )
-                else:
-                    flash('Error al obtener el archivo desde S3', 'danger')
-                    return redirect(url_for('index'))
+                # Generar URL firmada para descarga
+                url_firmada = s3_manager.generate_presigned_url(
+                    libro.archivo_pdf_url, 
+                    expiration=3600  # 1 hora
+                )
+                
+                # Redirigir a la URL firmada (descarga automática)
+                return redirect(url_firmada)
+                
             else:
-                # Descargar local
-                ruta_local = os.path.join(current_app.config.get('UPLOAD_FOLDER', 'uploads'), libro.archivo_pdf_url)
+                # Fallback: archivo local
+                ruta_local = os.path.join(
+                    current_app.config.get('UPLOAD_FOLDER', 'uploads'), 
+                    libro.archivo_pdf_url
+                )
+                
+                if not os.path.exists(ruta_local):
+                    flash('Archivo no encontrado', 'danger')
+                    return redirect(url_for('index'))
+                
                 return send_file(
                     ruta_local,
                     mimetype='application/pdf',
                     as_attachment=True,
                     download_name=f"{libro.titulo}.pdf"
                 )
+                
         except Exception as e:
+            log_error(f"Error al descargar libro: {str(e)}")
             flash(f'Error al descargar: {str(e)}', 'danger')
             return redirect(url_for('index'))
 

@@ -147,6 +147,17 @@
                 </div>
             </a>
         </div>
+        
+        <!-- ✅ AGREGADO: Enlace a Reportes de Asistencia -->
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('admin.ver_reportes_asistencia') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
+                    <i class="fas fa-file-pdf fa-3x text-primary mb-3"></i>
+                    <h6 class="fw-bold text-dark">Reportes de Asistencia</h6>
+                </div>
+            </a>
+        </div>
+        
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.toggle_chat') }}" class="text-decoration-none">
                 <div class="glass-card text-center p-4 hover-lift border-warning border-top border-4">
@@ -196,7 +207,6 @@
             </a>
         </div>
         
-        <!-- 🆕 NUEVO: ENCUESTAS DE RETROALIMENTACIÓN -->
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_encuestas') }}" class="text-decoration-none">
                 <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #10b981;">

@@ -133,11 +133,19 @@ def eliminar_alumno(id):
 def tomar_asistencia():
     fecha_str = request.form.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     fecha_obj = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+    grado_origen = request.form.get('grado_origen', '')
+    
+    registros_guardados = 0
     
     for key, value in request.form.items():
         if key.startswith('asistencia_'):
             alumno_id = int(key.split('_')[1])
             estado = value
+            
+            # Verificar que el alumno existe y está visible
+            alumno = UsuarioAlumno.query.get(alumno_id)
+            if not alumno:
+                continue
             
             registro = Asistencia.query.filter_by(alumno_id=alumno_id, fecha=fecha_obj).first()
             
@@ -146,10 +154,17 @@ def tomar_asistencia():
             else:
                 nuevo = Asistencia(alumno_id=alumno_id, fecha=fecha_obj, estado=estado)
                 db.session.add(nuevo)
+            
+            registros_guardados += 1
     
     db.session.commit()
-    flash(f'Asistencia del día {fecha_str} guardada correctamente.', 'success')
-    return redirect(url_for('admin.gestionar_alumnos', grado=request.form.get('grado_origen')))
+    
+    mensaje = f'✅ Asistencia del día {fecha_str} guardada correctamente'
+    if grado_origen:
+        mensaje = f'✅ Asistencia de {grado_origen} del día {fecha_str} guardada ({registros_guardados} alumnos)'
+    
+    flash(mensaje, 'success')
+    return redirect(url_for('admin.gestionar_alumnos'))
 
 @admin_bp.route('/reporte-asistencia/<grupo>')
 @require_profesor

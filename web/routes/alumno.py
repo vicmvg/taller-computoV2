@@ -316,7 +316,7 @@ def descargar_archivo_alumno(archivo_id):
         return redirect(url_for('alumno.ver_mis_archivos'))
 
 # --- RUTAS DE MENSAJES FLOTANTES ---
-@alumno_bp.route('/mensajes-flotantes/obtener')
+@alumno_bp.route('/api/mensajes-flotantes/obtener')  # ✅ CON /api/
 @require_alumno
 def obtener_mensajes_flotantes():
     alumno_id = session.get('alumno_id')
@@ -338,7 +338,7 @@ def obtener_mensajes_flotantes():
         'fecha': m.fecha_creacion.strftime('%d/%m/%Y %H:%M')
     } for m in mensajes])
 
-@alumno_bp.route('/mensajes-flotantes/marcar-leido/<int:mensaje_id>', methods=['POST'])
+@alumno_bp.route('/api/mensajes-flotantes/marcar-leido/<int:mensaje_id>', methods=['POST'])  # ✅ CON /api/
 @require_alumno
 def marcar_mensaje_leido(mensaje_id):
     alumno_id = session.get('alumno_id')
@@ -354,7 +354,7 @@ def marcar_mensaje_leido(mensaje_id):
     return jsonify({'status': 'ok'})
 
 # --- API PARA NOTIFICACIONES ---
-@alumno_bp.route('/archivos-nuevos/cantidad')
+@alumno_bp.route('/api/archivos-nuevos/cantidad')  # ✅ CON /api/
 @require_alumno
 def cantidad_archivos_nuevos():
     alumno_id = session.get('alumno_id')

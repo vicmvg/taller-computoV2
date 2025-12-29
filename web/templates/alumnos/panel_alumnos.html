@@ -1032,7 +1032,7 @@
         });
 
         function cargarMensajesFlotantes() {
-            fetch('/api/mensajes-flotantes/obtener')
+            fetch('/alumnos/api/mensajes-flotantes/obtener')
                 .then(response => response.json())
                 .then(mensajes => {
                     const container = document.getElementById('mensajes-flotantes-container');
@@ -1074,7 +1074,7 @@
                 elemento.classList.add('mensaje-saliendo');
                 
                 // Marcar como leído en el servidor
-                fetch(`/api/mensajes-flotantes/marcar-leido/${mensajeId}`, {
+                fetch(`/alumnos/api/mensajes-flotantes/marcar-leido/${mensajeId}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

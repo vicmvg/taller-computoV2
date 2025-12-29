@@ -82,21 +82,20 @@
         font-weight: bold;
     }
 
-    /* 📖 Estilo para truncar descripción de libros */
+    /* 📖 Estilo para truncar descripción de libros - CORREGIDO */
     .libro-descripcion {
         display: -webkit-box;
         -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
         text-overflow: ellipsis;
-        /* Propiedades estándar para compatibilidad futura */
-        display: -webkit-box;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        /* Propiedad estándar */
+        /* Propiedades estándar modernas */
+        display: -moz-box;
+        -moz-box-orient: vertical;
+        -moz-line-clamp: 3;
+        display: box;
+        box-orient: vertical;
         line-clamp: 3;
-        /* Fallback para navegadores antiguos */
-        max-height: 4.5em; /* Aproximadamente 3 líneas */
     }
 </style>
 

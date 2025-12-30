@@ -333,6 +333,7 @@ class RespuestaEncuesta(db.Model):
             self.pregunta5_dificultad
         ]
         return sum(respuestas) / len(respuestas)
+
 class LibroDigital(db.Model):
     """Libros y documentos de la biblioteca digital"""
     __tablename__ = 'libros_digitales'
@@ -367,3 +368,48 @@ class LibroDigital(db.Model):
         """Incrementa el contador de descargas"""
         self.descargas += 1
         db.session.commit()
+
+class ReporteClase(db.Model):
+    """Reportes detallados de las clases impartidas"""
+    __tablename__ = 'reportes_clase'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Información básica
+    fecha_clase = db.Column(db.Date, nullable=False)
+    hora_inicio = db.Column(db.String(10), nullable=False)
+    hora_fin = db.Column(db.String(10), nullable=False)
+    grado_grupo = db.Column(db.String(20), nullable=False)
+    
+    # Contenido de la clase
+    tema = db.Column(db.String(200), nullable=False)
+    descripcion = db.Column(db.Text, nullable=False)
+    objetivos_cumplidos = db.Column(db.Text, nullable=True)
+    
+    # Observaciones e incidencias
+    incidencias = db.Column(db.Text, nullable=True)
+    observaciones = db.Column(db.Text, nullable=True)
+    
+    # Información de asistencia (opcional)
+    total_alumnos = db.Column(db.Integer, nullable=True)
+    alumnos_presentes = db.Column(db.Integer, nullable=True)
+    alumnos_ausentes = db.Column(db.Integer, nullable=True)
+    
+    # Datos del maestro
+    maestro_computo = db.Column(db.String(100), nullable=False)
+    maestro_grupo = db.Column(db.String(100), nullable=True)
+    
+    # Metadatos
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_modificacion = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    creado_por = db.Column(db.String(100), nullable=False)
+    
+    def __repr__(self):
+        return f'<ReporteClase {self.grado_grupo} - {self.fecha_clase} - {self.tema}>'
+    
+    @property
+    def porcentaje_asistencia(self):
+        """Calcula el porcentaje de asistencia si hay datos"""
+        if self.total_alumnos and self.alumnos_presentes:
+            return round((self.alumnos_presentes / self.total_alumnos) * 100, 1)
+        return None

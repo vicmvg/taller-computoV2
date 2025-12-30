@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Encabezado -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold" style="color: #1e293b;">
+                <i class="fas fa-clipboard-check text-primary me-2"></i>
+                Reportes de Clase
+            </h2>
+            <p class="text-muted mb-0">Gestiona y consulta los reportes de las clases impartidas</p>
+        </div>
+        <div>
+            <a href="{{ url_for('admin.crear_reporte_clase') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>Nuevo Reporte
+            </a>
+            <a href="{{ url_for('admin.dashboard') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Regresar
+            </a>
+        </div>
+    </div>
+
+    <!-- Tarjetas de estadísticas -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-6">
+            <div class="glass-card p-4 border-start border-4 border-primary">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted text-uppercase small fw-bold mb-1">Total de Reportes</h6>
+                        <h2 class="display-6 fw-bold text-primary mb-0">{{ total_reportes }}</h2>
+                    </div>
+                    <div class="bg-primary bg-opacity-10 p-3 rounded-circle">
+                        <i class="fas fa-file-alt fa-2x text-primary"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="glass-card p-4 border-start border-4 border-success">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted text-uppercase small fw-bold mb-1">Reportes Este Mes</h6>
+                        <h2 class="display-6 fw-bold text-success mb-0">{{ reportes_mes_actual }}</h2>
+                    </div>
+                    <div class="bg-success bg-opacity-10 p-3 rounded-circle">
+                        <i class="fas fa-calendar-check fa-2x text-success"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="glass-card p-4 mb-4">
+        <form method="GET" action="{{ url_for('admin.gestionar_reportes_clase') }}" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label fw-bold">Grupo</label>
+                <select name="grado" class="form-select">
+                    <option value="Todos" {% if not filtro_grado or filtro_grado == 'Todos' %}selected{% endif %}>Todos los grupos</option>
+                    {% for grupo in grupos %}
+                        <option value="{{ grupo }}" {% if filtro_grado == grupo %}selected{% endif %}>{{ grupo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-bold">Fecha Inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control" value="{{ filtro_fecha_inicio or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-bold">Fecha Fin</label>
+                <input type="date" name="fecha_fin" class="form-control" value="{{ filtro_fecha_fin or '' }}">
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter me-2"></i>Filtrar
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Lista de reportes -->
+    <div class="glass-card p-4">
+        {% if reportes %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Horario</th>
+                            <th>Grupo</th>
+                            <th>Tema</th>
+                            <th>Asistencia</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for reporte in reportes %}
+                        <tr>
+                            <td class="fw-bold">{{ reporte.fecha_clase.strftime('%d/%m/%Y') }}</td>
+                            <td>
+                                <span class="badge bg-info">
+                                    {{ reporte.hora_inicio }} - {{ reporte.hora_fin }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge bg-primary">{{ reporte.grado_grupo }}</span>
+                            </td>
+                            <td>
+                                <div class="fw-bold">{{ reporte.tema[:50] }}{% if reporte.tema|length > 50 %}...{% endif %}</div>
+                                <small class="text-muted">{{ reporte.descripcion[:80] }}{% if reporte.descripcion|length > 80 %}...{% endif %}</small>
+                            </td>
+                            <td>
+                                {% if reporte.porcentaje_asistencia %}
+                                    <div class="d-flex align-items-center">
+                                        <div class="progress flex-grow-1 me-2" style="height: 20px;">
+                                            <div class="progress-bar 
+                                                {% if reporte.porcentaje_asistencia >= 90 %}bg-success
+                                                {% elif reporte.porcentaje_asistencia >= 75 %}bg-warning
+                                                {% else %}bg-danger{% endif %}"
+                                                style="width: {{ reporte.porcentaje_asistencia }}%">
+                                            </div>
+                                        </div>
+                                        <small class="fw-bold">{{ reporte.porcentaje_asistencia }}%</small>
+                                    </div>
+                                {% else %}
+                                    <span class="text-muted">Sin datos</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{{ url_for('admin.ver_reporte_clase', id=reporte.id) }}" 
+                                       class="btn btn-outline-info" title="Ver detalles">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.imprimir_reporte_clase', id=reporte.id) }}" 
+                                       class="btn btn-outline-success" title="Descargar PDF">
+                                        <i class="fas fa-file-pdf"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.editar_reporte_clase', id=reporte.id) }}" 
+                                       class="btn btn-outline-warning" title="Editar">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <button type="button" 
+                                            class="btn btn-outline-danger" 
+                                            onclick="confirmarEliminacion({{ reporte.id }}, '{{ reporte.grado_grupo }} - {{ reporte.tema[:30] }}')"
+                                            title="Eliminar">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-clipboard-list fa-4x text-muted mb-3"></i>
+                <h5 class="text-muted">No hay reportes registrados</h5>
+                <p class="text-muted">Comienza creando tu primer reporte de clase</p>
+                <a href="{{ url_for('admin.crear_reporte_clase') }}" class="btn btn-primary mt-3">
+                    <i class="fas fa-plus me-2"></i>Crear Primer Reporte
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Modal de confirmación de eliminación -->
+<div class="modal fade" id="modalEliminar" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Confirmar Eliminación
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Estás seguro de que deseas eliminar este reporte?</p>
+                <p class="fw-bold" id="reporteInfo"></p>
+                <p class="text-danger mb-0">
+                    <i class="fas fa-exclamation-circle me-2"></i>Esta acción no se puede deshacer.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <form id="formEliminar" method="POST" style="display: inline;">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-trash me-2"></i>Eliminar
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function confirmarEliminacion(id, info) {
+    document.getElementById('reporteInfo').textContent = info;
+    document.getElementById('formEliminar').action = `/admin/reportes-clase/eliminar/${id}`;
+    new bootstrap.Modal(document.getElementById('modalEliminar')).show();
+}
+</script>
+
+<style>
+.glass-card {
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.hover-lift {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hover-lift:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+}
+
+.table tbody tr:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+}
+</style>
+{% endblock %}

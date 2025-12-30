@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Encabezado -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold" style="color: #1e293b;">
+                <i class="fas fa-plus-circle text-primary me-2"></i>
+                Nuevo Reporte de Clase
+            </h2>
+            <p class="text-muted mb-0">Documenta los detalles de la clase impartida</p>
+        </div>
+        <a href="{{ url_for('admin.gestionar_reportes_clase') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Regresar
+        </a>
+    </div>
+
+    <!-- Formulario -->
+    <form method="POST" action="{{ url_for('admin.crear_reporte_clase') }}">
+        <div class="row g-4">
+            <!-- Columna izquierda -->
+            <div class="col-lg-6">
+                <!-- Información básica -->
+                <div class="glass-card p-4 mb-4">
+                    <h5 class="fw-bold mb-3" style="color: #1e293b;">
+                        <i class="fas fa-info-circle text-primary me-2"></i>Información Básica
+                    </h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Fecha de la Clase <span class="text-danger">*</span></label>
+                        <input type="date" name="fecha_clase" class="form-control" 
+                               value="{{ fecha_hoy }}" max="{{ fecha_hoy }}" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Hora Inicio <span class="text-danger">*</span></label>
+                            <input type="time" name="hora_inicio" class="form-control" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Hora Fin <span class="text-danger">*</span></label>
+                            <input type="time" name="hora_fin" class="form-control" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Grupo <span class="text-danger">*</span></label>
+                        <select name="grado_grupo" class="form-select" required>
+                            <option value="">Selecciona un grupo...</option>
+                            {% for grupo in grupos %}
+                                <option value="{{ grupo }}">{{ grupo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Contenido de la clase -->
+                <div class="glass-card p-4 mb-4">
+                    <h5 class="fw-bold mb-3" style="color: #1e293b;">
+                        <i class="fas fa-book-open text-info me-2"></i>Contenido de la Clase
+                    </h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Tema <span class="text-danger">*</span></label>
+                        <input type="text" name="tema" class="form-control" 
+                               placeholder="Ej: Introducción a Excel - Fórmulas Básicas" 
+                               required maxlength="200">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Descripción de la Clase <span class="text-danger">*</span></label>
+                        <textarea name="descripcion" class="form-control" rows="5" 
+                                  placeholder="Describe de qué trató la clase, qué actividades se realizaron, cómo fue el desarrollo..."
+                                  required></textarea>
+                        <small class="text-muted">Detalla el contenido abordado y las actividades realizadas</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Objetivos Cumplidos</label>
+                        <textarea name="objetivos_cumplidos" class="form-control" rows="3"
+                                  placeholder="¿Qué objetivos se lograron en esta clase?"></textarea>
+                        <small class="text-muted">Opcional: Indica qué metas o competencias se alcanzaron</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Columna derecha -->
+            <div class="col-lg-6">
+                <!-- Asistencia -->
+                <div class="glass-card p-4 mb-4">
+                    <h5 class="fw-bold mb-3" style="color: #1e293b;">
+                        <i class="fas fa-users text-success me-2"></i>Asistencia (Opcional)
+                    </h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Total de Alumnos</label>
+                        <input type="number" name="total_alumnos" class="form-control" 
+                               min="0" placeholder="Ej: 30"
+                               onchange="calcularAusentes()">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Alumnos Presentes</label>
+                        <input type="number" name="alumnos_presentes" class="form-control" 
+                               min="0" placeholder="Ej: 28"
+                               onchange="calcularAusentes()">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Alumnos Ausentes</label>
+                        <input type="number" name="alumnos_ausentes" class="form-control" 
+                               min="0" readonly placeholder="Se calcula automáticamente">
+                        <small class="text-muted">Este campo se calcula automáticamente</small>
+                    </div>
+                </div>
+
+                <!-- Incidencias y Observaciones -->
+                <div class="glass-card p-4 mb-4">
+                    <h5 class="fw-bold mb-3" style="color: #1e293b;">
+                        <i class="fas fa-exclamation-triangle text-warning me-2"></i>Incidencias y Observaciones
+                    </h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Incidencias</label>
+                        <textarea name="incidencias" class="form-control" rows="3"
+                                  placeholder="Reporta cualquier problema, conflicto o situación especial que haya ocurrido..."></textarea>
+                        <small class="text-muted">Problemas técnicos, disciplinarios o situaciones especiales</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Observaciones Generales</label>
+                        <textarea name="observaciones" class="form-control" rows="3"
+                                  placeholder="Notas adicionales, comentarios sobre el grupo, sugerencias..."></textarea>
+                        <small class="text-muted">Cualquier comentario adicional sobre la clase</small>
+                    </div>
+                </div>
+
+                <!-- Información de Maestros -->
+                <div class="glass-card p-4 mb-4">
+                    <h5 class="fw-bold mb-3" style="color: #1e293b;">
+                        <i class="fas fa-chalkboard-teacher text-primary me-2"></i>Información de Maestros
+                    </h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Maestro de Cómputo <span class="text-danger">*</span></label>
+                        <input type="text" name="maestro_computo" class="form-control" 
+                               value="{{ nombre_profesor }}" required maxlength="100">
+                        <small class="text-muted">Tu nombre completo</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Maestro Encargado del Grupo</label>
+                        <input type="text" name="maestro_grupo" class="form-control" 
+                               placeholder="Nombre del maestro titular del grupo" maxlength="100">
+                        <small class="text-muted">Opcional: Nombre del maestro que lidera este grupo</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Botones de acción -->
+        <div class="glass-card p-4 mt-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="text-muted">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Los campos marcados con <span class="text-danger">*</span> son obligatorios
+                </div>
+                <div>
+                    <a href="{{ url_for('admin.gestionar_reportes_clase') }}" class="btn btn-secondary me-2">
+                        <i class="fas fa-times me-2"></i>Cancelar
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>Guardar Reporte
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+function calcularAusentes() {
+    const total = parseInt(document.querySelector('[name="total_alumnos"]').value) || 0;
+    const presentes = parseInt(document.querySelector('[name="alumnos_presentes"]').value) || 0;
+    const ausentes = Math.max(0, total - presentes);
+    document.querySelector('[name="alumnos_ausentes"]').value = ausentes;
+}
+</script>
+
+<style>
+.glass-card {
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+</style>
+{% endblock %}

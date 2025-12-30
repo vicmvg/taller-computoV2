@@ -1,0 +1,234 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Encabezado con acciones -->
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h2 class="fw-bold" style="color: #1e293b;">
+                <i class="fas fa-file-alt text-primary me-2"></i>
+                Detalle del Reporte
+            </h2>
+            <p class="text-muted mb-0">{{ reporte.grado_grupo }} - {{ reporte.fecha_clase.strftime('%d de %B, %Y') }}</p>
+        </div>
+        <div>
+            <a href="{{ url_for('admin.imprimir_reporte_clase', id=reporte.id) }}" 
+               class="btn btn-success me-2">
+                <i class="fas fa-file-pdf me-2"></i>Descargar PDF
+            </a>
+            <a href="{{ url_for('admin.editar_reporte_clase', id=reporte.id) }}" 
+               class="btn btn-warning me-2">
+                <i class="fas fa-edit me-2"></i>Editar
+            </a>
+            <a href="{{ url_for('admin.gestionar_reportes_clase') }}" 
+               class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Regresar
+            </a>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Información principal -->
+        <div class="col-lg-8">
+            <!-- Datos básicos -->
+            <div class="glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-info-circle text-primary me-2"></i>Información General
+                </h5>
+                
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <div class="info-item">
+                            <i class="fas fa-calendar text-primary me-2"></i>
+                            <strong>Fecha:</strong>
+                            <div class="ms-4">{{ reporte.fecha_clase.strftime('%d/%m/%Y') }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="info-item">
+                            <i class="fas fa-clock text-info me-2"></i>
+                            <strong>Horario:</strong>
+                            <div class="ms-4">{{ reporte.hora_inicio }} - {{ reporte.hora_fin }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="info-item">
+                            <i class="fas fa-users text-success me-2"></i>
+                            <strong>Grupo:</strong>
+                            <div class="ms-4">
+                                <span class="badge bg-primary fs-6">{{ reporte.grado_grupo }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tema y descripción -->
+            <div class="glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-book-open text-info me-2"></i>Tema de la Clase
+                </h5>
+                <h4 class="text-primary mb-3">{{ reporte.tema }}</h4>
+                
+                <h6 class="fw-bold mb-2">Descripción:</h6>
+                <p class="text-justify" style="white-space: pre-wrap;">{{ reporte.descripcion }}</p>
+            </div>
+
+            <!-- Objetivos cumplidos -->
+            {% if reporte.objetivos_cumplidos %}
+            <div class="glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-check-circle text-success me-2"></i>Objetivos Cumplidos
+                </h5>
+                <p class="text-justify" style="white-space: pre-wrap;">{{ reporte.objetivos_cumplidos }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Incidencias -->
+            {% if reporte.incidencias %}
+            <div class="glass-card p-4 mb-4 border-start border-4 border-warning">
+                <h5 class="fw-bold mb-3" style="color: #1e293b;">
+                    <i class="fas fa-exclamation-triangle text-warning me-2"></i>Incidencias Reportadas
+                </h5>
+                <p class="text-justify" style="white-space: pre-wrap;">{{ reporte.incidencias }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Observaciones -->
+            {% if reporte.observaciones %}
+            <div class="glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-sticky-note text-secondary me-2"></i>Observaciones
+                </h5>
+                <p class="text-justify" style="white-space: pre-wrap;">{{ reporte.observaciones }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Panel lateral -->
+        <div class="col-lg-4">
+            <!-- Asistencia -->
+            {% if reporte.total_alumnos %}
+            <div class="glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-users text-success me-2"></i>Asistencia
+                </h5>
+                
+                <div class="text-center mb-3">
+                    <div class="position-relative d-inline-block">
+                        <svg width="120" height="120" viewBox="0 0 120 120">
+                            <circle cx="60" cy="60" r="54" fill="none" stroke="#e9ecef" stroke-width="12"/>
+                            <circle cx="60" cy="60" r="54" fill="none" 
+                                    stroke="{% if reporte.porcentaje_asistencia >= 90 %}#28a745{% elif reporte.porcentaje_asistencia >= 75 %}#ffc107{% else %}#dc3545{% endif %}" 
+                                    stroke-width="12"
+                                    stroke-dasharray="339.292"
+                                    stroke-dashoffset="{{ 339.292 - (339.292 * reporte.porcentaje_asistencia / 100) }}"
+                                    transform="rotate(-90 60 60)"/>
+                        </svg>
+                        <div class="position-absolute top-50 start-50 translate-middle">
+                            <h2 class="fw-bold mb-0">{{ reporte.porcentaje_asistencia|int }}%</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-list">
+                    <div class="d-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded">
+                        <span><i class="fas fa-users text-primary me-2"></i>Total:</span>
+                        <strong>{{ reporte.total_alumnos }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-2 p-2 bg-success bg-opacity-10 rounded">
+                        <span><i class="fas fa-check text-success me-2"></i>Presentes:</span>
+                        <strong class="text-success">{{ reporte.alumnos_presentes }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center p-2 bg-danger bg-opacity-10 rounded">
+                        <span><i class="fas fa-times text-danger me-2"></i>Ausentes:</span>
+                        <strong class="text-danger">{{ reporte.alumnos_ausentes }}</strong>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Maestros -->
+            <div class="glass-card p-4 mb-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-chalkboard-teacher text-primary me-2"></i>Maestros
+                </h5>
+                
+                <div class="mb-3">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-primary bg-opacity-10 p-3 rounded-circle me-3">
+                            <i class="fas fa-laptop text-primary"></i>
+                        </div>
+                        <div>
+                            <small class="text-muted d-block">Maestro de Cómputo</small>
+                            <strong>{{ reporte.maestro_computo }}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                {% if reporte.maestro_grupo %}
+                <div>
+                    <div class="d-flex align-items-center">
+                        <div class="bg-info bg-opacity-10 p-3 rounded-circle me-3">
+                            <i class="fas fa-user-tie text-info"></i>
+                        </div>
+                        <div>
+                            <small class="text-muted d-block">Maestro del Grupo</small>
+                            <strong>{{ reporte.maestro_grupo }}</strong>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Metadatos -->
+            <div class="glass-card p-4">
+                <h5 class="fw-bold mb-3 border-bottom pb-2" style="color: #1e293b;">
+                    <i class="fas fa-info-circle text-secondary me-2"></i>Información del Reporte
+                </h5>
+                
+                <div class="small">
+                    <div class="mb-2">
+                        <i class="fas fa-user text-muted me-2"></i>
+                        <strong>Creado por:</strong> {{ reporte.creado_por }}
+                    </div>
+                    <div class="mb-2">
+                        <i class="fas fa-calendar-plus text-muted me-2"></i>
+                        <strong>Fecha de creación:</strong><br>
+                        <span class="ms-4">{{ reporte.fecha_creacion.strftime('%d/%m/%Y %H:%M') }}</span>
+                    </div>
+                    {% if reporte.fecha_modificacion != reporte.fecha_creacion %}
+                    <div>
+                        <i class="fas fa-calendar-check text-muted me-2"></i>
+                        <strong>Última modificación:</strong><br>
+                        <span class="ms-4">{{ reporte.fecha_modificacion.strftime('%d/%m/%Y %H:%M') }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.glass-card {
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.info-item {
+    margin-bottom: 1rem;
+}
+
+.info-item i {
+    vertical-align: middle;
+}
+
+.text-justify {
+    text-align: justify;
+    line-height: 1.6;
+}
+</style>
+{% endblock %}

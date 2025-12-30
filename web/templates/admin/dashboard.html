@@ -69,7 +69,7 @@
     <div class="row g-4">
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.inventario') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
                     <i class="fas fa-box-open fa-3x text-primary mb-3"></i>
                     <h6 class="fw-bold text-dark">Ver Inventario</h6>
                 </div>
@@ -77,7 +77,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.inventario') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift border-dark border-top border-4">
                     <i class="fas fa-qrcode fa-3x text-dark mb-3"></i>
                     <h6 class="fw-bold text-dark">Generar QRs</h6>
                 </div>
@@ -85,7 +85,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.mantenimiento') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift border-danger border-top border-4">
                     <i class="fas fa-clipboard-list fa-3x text-danger mb-3"></i>
                     <h6 class="fw-bold text-dark">Bitácora Fallas</h6>
                 </div>
@@ -93,7 +93,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_anuncios') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift border-warning border-top border-4">
                     <i class="fas fa-bullhorn fa-3x text-warning mb-3"></i>
                     <h6 class="fw-bold text-dark">Publicar Avisos</h6>
                 </div>
@@ -101,7 +101,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_grados') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift border-info border-top border-4">
                     <i class="fas fa-chalkboard-teacher fa-3x text-info mb-3"></i>
                     <h6 class="fw-bold text-dark">Planeación Semanal</h6>
                 </div>
@@ -109,7 +109,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_cuestionarios') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #8b5cf6;">
                     <i class="fas fa-file-signature fa-3x mb-3" style="color: #8b5cf6;"></i>
                     <h6 class="fw-bold text-dark">Asignar Examen</h6>
                 </div>
@@ -117,7 +117,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_horarios') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift border-success border-top border-4">
                     <i class="fas fa-clock fa-3x text-success mb-3"></i>
                     <h6 class="fw-bold text-dark">Gestionar Horarios</h6>
                 </div>
@@ -125,24 +125,24 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_plataformas') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
-                    <i class="fas fa-gamepad fa-3x text-primary mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #0ea5e9;">
+                    <i class="fas fa-gamepad fa-3x mb-3" style="color: #0ea5e9;"></i>
                     <h6 class="fw-bold text-dark">Sitios Práctica</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_recursos') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
-                    <i class="fas fa-folder-open fa-3x text-success mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #10b981;">
+                    <i class="fas fa-folder-open fa-3x mb-3" style="color: #10b981;"></i>
                     <h6 class="fw-bold text-dark">Subir Recursos</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_banco') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
-                    <i class="fas fa-archive fa-3x text-info mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #06b6d4;">
+                    <i class="fas fa-archive fa-3x mb-3" style="color: #06b6d4;"></i>
                     <h6 class="fw-bold text-dark">Banco Exámenes</h6>
                 </div>
             </a>
@@ -161,9 +161,19 @@
         <!-- ✅ Reportes de Asistencia -->
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.ver_reportes_asistencia') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
-                    <i class="fas fa-file-pdf fa-3x text-primary mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #3b82f6;">
+                    <i class="fas fa-file-pdf fa-3x mb-3" style="color: #3b82f6;"></i>
                     <h6 class="fw-bold text-dark">Reportes de Asistencia</h6>
+                </div>
+            </a>
+        </div>
+        
+        <!-- ✅ NUEVO: Reportes de Clase -->
+        <div class="col-md-3 col-6">
+            <a href="{{ url_for('admin.gestionar_reportes_clase') }}" class="text-decoration-none">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #ec4899;">
+                    <i class="fas fa-clipboard-check fa-3x mb-3" style="color: #ec4899;"></i>
+                    <h6 class="fw-bold text-dark">Reportes de Clase</h6>
                 </div>
             </a>
         </div>
@@ -178,7 +188,7 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.configurar_boletas') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #6c757d;">
                     <i class="fas fa-cog fa-3x text-secondary mb-3"></i>
                     <h6 class="fw-bold text-dark">Configurar Rubros</h6>
                 </div>
@@ -186,32 +196,32 @@
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.generar_boleta') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-primary border-top border-4">
-                    <i class="fas fa-file-contract fa-3x text-primary mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #2563eb;">
+                    <i class="fas fa-file-contract fa-3x mb-3" style="color: #2563eb;"></i>
                     <h6 class="fw-bold text-dark">Generar Boleta</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.ver_boletas_historial') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-success border-top border-4">
-                    <i class="fas fa-file-alt fa-3x text-success mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #16a34a;">
+                    <i class="fas fa-file-alt fa-3x mb-3" style="color: #16a34a;"></i>
                     <h6 class="fw-bold text-dark">Historial Boletas</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_mensajes_flotantes') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #6c5ce7;">
-                    <i class="fas fa-bullhorn fa-3x mb-3" style="color: #6c5cf7;"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #6366f1;">
+                    <i class="fas fa-bullhorn fa-3x mb-3" style="color: #6366f1;"></i>
                     <h6 class="fw-bold text-dark">Mensajes Flotantes</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.gestionar_pagos') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-success border-top border-4">
-                    <i class="fas fa-dollar-sign fa-3x text-success mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #22c55e;">
+                    <i class="fas fa-dollar-sign fa-3x mb-3" style="color: #22c55e;"></i>
                     <h6 class="fw-bold text-dark">Gestionar Pagos</h6>
                 </div>
             </a>
@@ -228,27 +238,27 @@
         
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.ver_solicitudes_archivo') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-warning border-top border-4 position-relative">
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #f59e0b; position: relative;">
                     <span id="badge-solicitudes-dashboard" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display: none;">
                         0
                     </span>
-                    <i class="fas fa-file-invoice fa-3x text-warning mb-3"></i>
+                    <i class="fas fa-file-invoice fa-3x mb-3" style="color: #f59e0b;"></i>
                     <h6 class="fw-bold text-dark">Solicitudes de Archivos</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.enviar_archivo_directo') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift border-info border-top border-4">
-                    <i class="fas fa-file-upload fa-3x text-info mb-3"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #14b8a6;">
+                    <i class="fas fa-file-upload fa-3x mb-3" style="color: #14b8a6;"></i>
                     <h6 class="fw-bold text-dark">Enviar Archivo</h6>
                 </div>
             </a>
         </div>
         <div class="col-md-3 col-6">
             <a href="{{ url_for('admin.ver_archivos_enviados') }}" class="text-decoration-none">
-                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #8b5cf6;">
-                    <i class="fas fa-folder-open fa-3x mb-3" style="color: #8b5cf6;"></i>
+                <div class="glass-card text-center p-4 hover-lift" style="border-top: 4px solid #a855f7;">
+                    <i class="fas fa-folder-open fa-3x mb-3" style="color: #a855f7;"></i>
                     <h6 class="fw-bold text-dark">Historial de Archivos</h6>
                 </div>
             </a>

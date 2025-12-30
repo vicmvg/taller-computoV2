@@ -5,7 +5,7 @@ from web.models import (Equipo, Mantenimiento, Anuncio, UsuarioAlumno,
                         ArchivoEnviado, ReporteAsistencia, ActividadGrado, Cuestionario,
                         BancoCuestionario, Horario, Plataforma, Mensaje, MensajeFlotante,
                         MensajeLeido, Configuracion, Recurso, CriterioBoleta, BoletaGenerada,
-                        Encuesta, RespuestaEncuesta, LibroDigital)  # ✅ Agregué LibroDigital aquí
+                        Encuesta, RespuestaEncuesta, LibroDigital, ReporteClase)  # ✅ Agregué ReporteClase aquí
 from web.extensions import db
 from web.utils import require_profesor, s3_manager, guardar_archivo, generar_qr_img, log_error, log_info, generar_pdf_boleta, descargar_archivo, FileValidator
 from datetime import datetime, timedelta, date  # ✅ Agregué 'date' aquí
@@ -1998,3 +1998,410 @@ def eliminar_libro(id):
     
     flash(f'Libro "{titulo}" eliminado correctamente', 'success')
     return redirect(url_for('admin.gestionar_biblioteca'))
+
+# ============================================================================
+# RUTAS PARA REPORTES DE CLASE
+# ============================================================================
+
+# --- REPORTES DE CLASE ---
+@admin_bp.route('/reportes-clase')
+@require_profesor
+def gestionar_reportes_clase():
+    """Lista todos los reportes de clase con filtros"""
+    # Obtener filtros
+    filtro_grado = request.args.get('grado')
+    filtro_fecha_inicio = request.args.get('fecha_inicio')
+    filtro_fecha_fin = request.args.get('fecha_fin')
+    
+    # Query base
+    query = ReporteClase.query
+    
+    # Aplicar filtros
+    if filtro_grado and filtro_grado != 'Todos':
+        query = query.filter_by(grado_grupo=filtro_grado)
+    
+    if filtro_fecha_inicio:
+        try:
+            fecha_inicio = datetime.strptime(filtro_fecha_inicio, '%Y-%m-%d').date()
+            query = query.filter(ReporteClase.fecha_clase >= fecha_inicio)
+        except:
+            pass
+    
+    if filtro_fecha_fin:
+        try:
+            fecha_fin = datetime.strptime(filtro_fecha_fin, '%Y-%m-%d').date()
+            query = query.filter(ReporteClase.fecha_clase <= fecha_fin)
+        except:
+            pass
+    
+    # Ordenar por fecha descendente
+    reportes = query.order_by(ReporteClase.fecha_clase.desc(), ReporteClase.hora_inicio.desc()).all()
+    
+    # Obtener lista única de grupos para el filtro
+    grupos = db.session.query(ReporteClase.grado_grupo).distinct().order_by(ReporteClase.grado_grupo).all()
+    grupos = [g[0] for g in grupos]
+    
+    # Estadísticas
+    total_reportes = ReporteClase.query.count()
+    reportes_mes_actual = ReporteClase.query.filter(
+        db.extract('month', ReporteClase.fecha_clase) == datetime.now().month,
+        db.extract('year', ReporteClase.fecha_clase) == datetime.now().year
+    ).count()
+    
+    return render_template('admin/reportes_clase.html',
+                         reportes=reportes,
+                         grupos=grupos,
+                         filtro_grado=filtro_grado,
+                         filtro_fecha_inicio=filtro_fecha_inicio,
+                         filtro_fecha_fin=filtro_fecha_fin,
+                         total_reportes=total_reportes,
+                         reportes_mes_actual=reportes_mes_actual,
+                         fecha_hoy=date.today().isoformat())
+
+
+@admin_bp.route('/reportes-clase/nuevo', methods=['GET', 'POST'])
+@require_profesor
+def crear_reporte_clase():
+    """Crear un nuevo reporte de clase"""
+    if request.method == 'POST':
+        try:
+            # Obtener datos del formulario
+            fecha_clase = datetime.strptime(request.form['fecha_clase'], '%Y-%m-%d').date()
+            hora_inicio = request.form['hora_inicio']
+            hora_fin = request.form['hora_fin']
+            grado_grupo = request.form['grado_grupo']
+            tema = request.form['tema'].strip()
+            descripcion = request.form['descripcion'].strip()
+            objetivos_cumplidos = request.form.get('objetivos_cumplidos', '').strip()
+            incidencias = request.form.get('incidencias', '').strip()
+            observaciones = request.form.get('observaciones', '').strip()
+            
+            # Datos de asistencia (opcionales)
+            total_alumnos = request.form.get('total_alumnos', '').strip()
+            alumnos_presentes = request.form.get('alumnos_presentes', '').strip()
+            alumnos_ausentes = request.form.get('alumnos_ausentes', '').strip()
+            
+            # Datos de maestros
+            maestro_computo = request.form['maestro_computo'].strip()
+            maestro_grupo = request.form.get('maestro_grupo', '').strip()
+            
+            # Validaciones
+            if not tema or not descripcion:
+                flash('El tema y la descripción son obligatorios', 'warning')
+                return redirect(url_for('admin.crear_reporte_clase'))
+            
+            # Crear reporte
+            nuevo_reporte = ReporteClase(
+                fecha_clase=fecha_clase,
+                hora_inicio=hora_inicio,
+                hora_fin=hora_fin,
+                grado_grupo=grado_grupo,
+                tema=tema,
+                descripcion=descripcion,
+                objetivos_cumplidos=objetivos_cumplidos if objetivos_cumplidos else None,
+                incidencias=incidencias if incidencias else None,
+                observaciones=observaciones if observaciones else None,
+                total_alumnos=int(total_alumnos) if total_alumnos else None,
+                alumnos_presentes=int(alumnos_presentes) if alumnos_presentes else None,
+                alumnos_ausentes=int(alumnos_ausentes) if alumnos_ausentes else None,
+                maestro_computo=maestro_computo,
+                maestro_grupo=maestro_grupo if maestro_grupo else None,
+                creado_por=session.get('user', 'Admin')
+            )
+            
+            db.session.add(nuevo_reporte)
+            db.session.commit()
+            
+            flash(f'✅ Reporte de clase creado exitosamente para {grado_grupo}', 'success')
+            return redirect(url_for('admin.gestionar_reportes_clase'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al crear el reporte: {str(e)}', 'danger')
+            log_error(f'Error al crear reporte de clase', e)
+            return redirect(url_for('admin.crear_reporte_clase'))
+    
+    # GET - Mostrar formulario
+    # Obtener grupos únicos de alumnos
+    grupos = db.session.query(UsuarioAlumno.grado_grupo).distinct().order_by(UsuarioAlumno.grado_grupo).all()
+    grupos = [g[0] for g in grupos]
+    
+    return render_template('admin/crear_reporte_clase.html',
+                         grupos=grupos,
+                         fecha_hoy=date.today().isoformat(),
+                         nombre_profesor=session.get('user', 'Profesor'))
+
+
+@admin_bp.route('/reportes-clase/editar/<int:id>', methods=['GET', 'POST'])
+@require_profesor
+def editar_reporte_clase(id):
+    """Editar un reporte existente"""
+    reporte = ReporteClase.query.get_or_404(id)
+    
+    if request.method == 'POST':
+        try:
+            # Actualizar datos
+            reporte.fecha_clase = datetime.strptime(request.form['fecha_clase'], '%Y-%m-%d').date()
+            reporte.hora_inicio = request.form['hora_inicio']
+            reporte.hora_fin = request.form['hora_fin']
+            reporte.grado_grupo = request.form['grado_grupo']
+            reporte.tema = request.form['tema'].strip()
+            reporte.descripcion = request.form['descripcion'].strip()
+            reporte.objetivos_cumplidos = request.form.get('objetivos_cumplidos', '').strip() or None
+            reporte.incidencias = request.form.get('incidencias', '').strip() or None
+            reporte.observaciones = request.form.get('observaciones', '').strip() or None
+            
+            # Datos de asistencia
+            total = request.form.get('total_alumnos', '').strip()
+            presentes = request.form.get('alumnos_presentes', '').strip()
+            ausentes = request.form.get('alumnos_ausentes', '').strip()
+            
+            reporte.total_alumnos = int(total) if total else None
+            reporte.alumnos_presentes = int(presentes) if presentes else None
+            reporte.alumnos_ausentes = int(ausentes) if ausentes else None
+            
+            # Maestros
+            reporte.maestro_computo = request.form['maestro_computo'].strip()
+            reporte.maestro_grupo = request.form.get('maestro_grupo', '').strip() or None
+            
+            reporte.fecha_modificacion = datetime.utcnow()
+            
+            db.session.commit()
+            
+            flash('✅ Reporte actualizado correctamente', 'success')
+            return redirect(url_for('admin.gestionar_reportes_clase'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al actualizar: {str(e)}', 'danger')
+            log_error(f'Error al editar reporte {id}', e)
+    
+    # GET - Mostrar formulario con datos
+    grupos = db.session.query(UsuarioAlumno.grado_grupo).distinct().order_by(UsuarioAlumno.grado_grupo).all()
+    grupos = [g[0] for g in grupos]
+    
+    return render_template('admin/editar_reporte_clase.html',
+                         reporte=reporte,
+                         grupos=grupos)
+
+
+@admin_bp.route('/reportes-clase/eliminar/<int:id>', methods=['POST'])
+@require_profesor
+def eliminar_reporte_clase(id):
+    """Eliminar un reporte de clase"""
+    reporte = ReporteClase.query.get_or_404(id)
+    
+    try:
+        info = f"{reporte.grado_grupo} - {reporte.fecha_clase} - {reporte.tema}"
+        db.session.delete(reporte)
+        db.session.commit()
+        
+        flash(f'🗑️ Reporte eliminado: {info}', 'warning')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al eliminar: {str(e)}', 'danger')
+        log_error(f'Error al eliminar reporte {id}', e)
+    
+    return redirect(url_for('admin.gestionar_reportes_clase'))
+
+
+@admin_bp.route('/reportes-clase/ver/<int:id>')
+@require_profesor
+def ver_reporte_clase(id):
+    """Ver detalles completos de un reporte"""
+    reporte = ReporteClase.query.get_or_404(id)
+    return render_template('admin/ver_reporte_clase.html', reporte=reporte)
+
+
+@admin_bp.route('/reportes-clase/imprimir/<int:id>')
+@require_profesor
+def imprimir_reporte_clase(id):
+    """Generar PDF imprimible del reporte con firmas"""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+    from io import BytesIO
+    
+    reporte = ReporteClase.query.get_or_404(id)
+    
+    # Crear buffer para PDF
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.75*inch)
+    elementos = []
+    styles = getSampleStyleSheet()
+    
+    # Estilos personalizados
+    estilo_titulo = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor('#1e293b'),
+        spaceAfter=6,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    estilo_subtitulo = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Heading2'],
+        fontSize=12,
+        textColor=colors.HexColor('#475569'),
+        spaceAfter=12,
+        alignment=TA_CENTER
+    )
+    
+    estilo_seccion = ParagraphStyle(
+        'Section',
+        parent=styles['Heading3'],
+        fontSize=11,
+        textColor=colors.HexColor('#1e293b'),
+        spaceAfter=6,
+        fontName='Helvetica-Bold'
+    )
+    
+    estilo_normal = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=8,
+        alignment=TA_JUSTIFY
+    )
+    
+    # Encabezado
+    elementos.append(Paragraph("REPORTE DE CLASE", estilo_titulo))
+    elementos.append(Paragraph("Taller de Cómputo", estilo_subtitulo))
+    elementos.append(Spacer(1, 0.2*inch))
+    
+    # Información básica en tabla
+    datos_basicos = [
+        ['Fecha:', reporte.fecha_clase.strftime('%d/%m/%Y'), 'Grupo:', reporte.grado_grupo],
+        ['Horario:', f"{reporte.hora_inicio} - {reporte.hora_fin}", 'Profesor:', reporte.maestro_computo]
+    ]
+    
+    tabla_basica = Table(datos_basicos, colWidths=[1.2*inch, 2.3*inch, 1.2*inch, 2.3*inch])
+    tabla_basica.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f1f5f9')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    
+    elementos.append(tabla_basica)
+    elementos.append(Spacer(1, 0.25*inch))
+    
+    # Tema
+    elementos.append(Paragraph("TEMA DE LA CLASE", estilo_seccion))
+    elementos.append(Paragraph(reporte.tema, estilo_normal))
+    elementos.append(Spacer(1, 0.15*inch))
+    
+    # Descripción
+    elementos.append(Paragraph("DESCRIPCIÓN", estilo_seccion))
+    elementos.append(Paragraph(reporte.descripcion.replace('\n', '<br/>'), estilo_normal))
+    elementos.append(Spacer(1, 0.15*inch))
+    
+    # Objetivos (si hay)
+    if reporte.objetivos_cumplidos:
+        elementos.append(Paragraph("OBJETIVOS CUMPLIDOS", estilo_seccion))
+        elementos.append(Paragraph(reporte.objetivos_cumplidos.replace('\n', '<br/>'), estilo_normal))
+        elementos.append(Spacer(1, 0.15*inch))
+    
+    # Asistencia (si hay datos)
+    if reporte.total_alumnos:
+        elementos.append(Paragraph("ASISTENCIA", estilo_seccion))
+        datos_asistencia = [
+            ['Total de alumnos:', str(reporte.total_alumnos)],
+            ['Presentes:', str(reporte.alumnos_presentes or 0)],
+            ['Ausentes:', str(reporte.alumnos_ausentes or 0)],
+            ['Porcentaje:', f"{reporte.porcentaje_asistencia}%" if reporte.porcentaje_asistencia else 'N/A']
+        ]
+        tabla_asistencia = Table(datos_asistencia, colWidths=[2*inch, 2*inch])
+        tabla_asistencia.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elementos.append(tabla_asistencia)
+        elementos.append(Spacer(1, 0.15*inch))
+    
+    # Incidencias (si hay)
+    if reporte.incidencias:
+        elementos.append(Paragraph("INCIDENCIAS", estilo_seccion))
+        elementos.append(Paragraph(reporte.incidencias.replace('\n', '<br/>'), estilo_normal))
+        elementos.append(Spacer(1, 0.15*inch))
+    
+    # Observaciones (si hay)
+    if reporte.observaciones:
+        elementos.append(Paragraph("OBSERVACIONES", estilo_seccion))
+        elementos.append(Paragraph(reporte.observaciones.replace('\n', '<br/>'), estilo_normal))
+        elementos.append(Spacer(1, 0.15*inch))
+    
+    # Espacio para firmas
+    elementos.append(Spacer(1, 0.4*inch))
+    elementos.append(HRFlowable(width="100%", thickness=1, color=colors.grey, spaceAfter=0.1*inch))
+    
+    # Tabla de firmas
+    datos_firmas = [
+        ['MAESTRO DE CÓMPUTO', 'MAESTRO ENCARGADO DE GRUPO'],
+        ['', ''],
+        ['', ''],
+        [reporte.maestro_computo, reporte.maestro_grupo or '________________________']
+    ]
+    
+    tabla_firmas = Table(datos_firmas, colWidths=[3.5*inch, 3.5*inch])
+    tabla_firmas.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LINEABOVE', (0, 3), (-1, 3), 1, colors.black),
+        ('TOPPADDING', (0, 1), (-1, 2), 20),
+        ('BOTTOMPADDING', (0, 2), (-1, 2), 5),
+    ]))
+    
+    elementos.append(tabla_firmas)
+    
+    # Pie de página
+    elementos.append(Spacer(1, 0.2*inch))
+    estilo_pie = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.grey,
+        alignment=TA_CENTER
+    )
+    elementos.append(Paragraph(
+        f"Reporte generado el {datetime.now().strftime('%d/%m/%Y a las %H:%M')}",
+        estilo_pie
+    ))
+    
+    # Construir PDF
+    doc.build(elementos)
+    
+    # Preparar respuesta
+    buffer.seek(0)
+    nombre_archivo = f"Reporte_Clase_{reporte.grado_grupo}_{reporte.fecha_clase.strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=nombre_archivo
+    )

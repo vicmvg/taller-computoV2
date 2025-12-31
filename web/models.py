@@ -1,5 +1,5 @@
 # web/models.py
-from datetime import datetime
+from datetime import datetime, timedelta
 from .extensions import db
 
 class Equipo(db.Model):
@@ -413,3 +413,48 @@ class ReporteClase(db.Model):
         if self.total_alumnos and self.alumnos_presentes:
             return round((self.alumnos_presentes / self.total_alumnos) * 100, 1)
         return None
+
+class InfraccionChat(db.Model):
+    """Registro de infracciones de lenguaje inapropiado en el chat"""
+    __tablename__ = 'infracciones_chat'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Tipo de infracción
+    tipo = db.Column(db.String(50), nullable=False)  # 'advertencia', 'bloqueo_temporal', 'bloqueo_permanente'
+    mensaje_original = db.Column(db.Text, nullable=False)  # El mensaje que causó la infracción
+    palabras_detectadas = db.Column(db.String(500))  # Palabras que activaron el filtro
+    
+    # Metadatos
+    fecha_infraccion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_fin_bloqueo = db.Column(db.DateTime, nullable=True)  # Cuándo termina el bloqueo
+    activa = db.Column(db.Boolean, default=True)  # Si el bloqueo sigue vigente
+    
+    # Relación con alumno
+    alumno = db.relationship('UsuarioAlumno', backref='infracciones_chat')
+    
+    @staticmethod
+    def contar_infracciones_recientes(alumno_id, dias=30):
+        """Cuenta infracciones en los últimos X días"""
+        fecha_limite = datetime.utcnow() - timedelta(days=dias)
+        return InfraccionChat.query.filter(
+            InfraccionChat.alumno_id == alumno_id,
+            InfraccionChat.fecha_infraccion >= fecha_limite,
+            InfraccionChat.tipo.in_(['advertencia', 'bloqueo_temporal'])
+        ).count()
+    
+    @staticmethod
+    def tiene_bloqueo_activo(alumno_id):
+        """Verifica si el alumno tiene un bloqueo activo"""
+        bloqueo = InfraccionChat.query.filter(
+            InfraccionChat.alumno_id == alumno_id,
+            InfraccionChat.activa == True,
+            InfraccionChat.tipo.in_(['bloqueo_temporal', 'bloqueo_permanente']),
+            InfraccionChat.fecha_fin_bloqueo > datetime.utcnow()
+        ).first()
+        
+        return bloqueo
+    
+    def __repr__(self):
+        return f'<InfraccionChat {self.tipo} - Alumno {self.alumno_id}>'

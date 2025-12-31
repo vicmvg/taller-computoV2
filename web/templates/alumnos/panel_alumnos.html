@@ -971,13 +971,13 @@
             }
         }
 
-        // 2. ENVIAR MENSAJE
+        // 2. ENVIAR MENSAJE (con manejo de moderación)
         async function enviarMensaje(e) {
-            e.preventDefault(); // Evitar recarga de pagina
+            e.preventDefault();
             const input = document.getElementById('inputMensaje');
-            const texto = input.value;
+            const texto = input.value.trim();
             
-            if (!texto.trim() || chatBloqueado) return;
+            if (!texto || chatBloqueado) return;
 
             // Limpiar input visualmente rápido
             input.value = '';
@@ -986,14 +986,88 @@
             const formData = new FormData();
             formData.append('mensaje', texto);
             
-            await fetch('/alumnos/api/chat/enviar', {
-                method: 'POST',
-                body: formData
-            });
+            try {
+                const respuesta = await fetch('/alumnos/api/chat/enviar', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const datos = await respuesta.json();
+                
+                // Manejar diferentes respuestas
+                if (respuesta.status === 403) {
+                    // Mensaje bloqueado por moderación
+                    mostrarAlertaModeracion(datos.tipo, datos.msg);
+                    
+                    // Si fue bloqueado, actualizar UI
+                    if (datos.tipo === 'bloqueo_temporal' || datos.tipo === 'bloqueado') {
+                        chatBloqueado = true;
+                        input.disabled = true;
+                        input.placeholder = "Chat bloqueado";
+                        document.getElementById('avisoBloqueo').style.display = 'block';
+                        document.getElementById('avisoBloqueo').innerHTML = 
+                            `<small><i class="fas fa-ban"></i> ${datos.msg}</small>`;
+                    }
+                } else if (respuesta.status === 429) {
+                    // Rate limit
+                    mostrarAlertaTemporal('⏳ Espera un momento antes de enviar otro mensaje', 'warning');
+                } else if (datos.status === 'ok') {
+                    // Mensaje enviado exitosamente
+                    actualizarChat();
+                    setTimeout(scrollAlFondo, 200);
+                }
+                
+            } catch (error) {
+                console.error("Error al enviar mensaje", error);
+                mostrarAlertaTemporal('❌ Error al enviar mensaje', 'danger');
+            }
+        }
+
+        // Función para mostrar alertas de moderación
+        function mostrarAlertaModeracion(tipo, mensaje) {
+            const caja = document.getElementById('cajaMensajes');
             
-            // Actualizar chat inmediatamente
-            actualizarChat();
-            setTimeout(scrollAlFondo, 200);
+            let color = 'warning';
+            let icono = '⚠️';
+            
+            if (tipo === 'bloqueo_temporal' || tipo === 'bloqueado') {
+                color = 'danger';
+                icono = '🚫';
+            }
+            
+            const alerta = document.createElement('div');
+            alerta.className = `alert alert-${color} alert-dismissible fade show mx-3 my-2`;
+            alerta.innerHTML = `
+                <strong>${icono} ${mensaje}</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            caja.appendChild(alerta);
+            scrollAlFondo();
+            
+            // Auto-cerrar después de 10 segundos
+            setTimeout(() => {
+                alerta.remove();
+            }, 10000);
+        }
+
+        // Función auxiliar para alertas temporales
+        function mostrarAlertaTemporal(mensaje, tipo = 'info') {
+            const caja = document.getElementById('cajaMensajes');
+            
+            const alerta = document.createElement('div');
+            alerta.className = `alert alert-${tipo} alert-dismissible fade show mx-3 my-2`;
+            alerta.innerHTML = `
+                ${mensaje}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            caja.appendChild(alerta);
+            scrollAlFondo();
+            
+            setTimeout(() => {
+                alerta.remove();
+            }, 5000);
         }
 
         // Función para mostrar/ocultar el menú de emojis

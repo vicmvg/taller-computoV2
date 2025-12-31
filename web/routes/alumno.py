@@ -2,7 +2,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, send_file, send_from_directory
 from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion, Encuesta, RespuestaEncuesta
 from web.extensions import db
-from web.utils import require_alumno, s3_manager, file_validator, guardar_archivo, chat_limiter, log_error
+from web.utils import require_alumno, s3_manager, file_validator, guardar_archivo, chat_limiter, log_error, chat_moderator
 from datetime import datetime
 import os
 
@@ -183,16 +183,35 @@ def actualizar_foto_perfil():
 @alumno_bp.route('/api/chat/enviar', methods=['POST'])
 @require_alumno
 def enviar_mensaje():
-    alumno_key = f"alumno_{session['alumno_id']}"
-    if not chat_limiter.is_allowed(alumno_key):
-        return jsonify({'status': 'error', 'msg': 'Demasiados mensajes. Espera un momento.'}), 429
+    alumno_id = session['alumno_id']
+    alumno_key = f"alumno_{alumno_id}"
     
-    contenido = request.form.get('mensaje')
-    if not contenido or contenido.strip() == '':
+    # 1. Verificar rate limiting
+    if not chat_limiter.is_allowed(alumno_key):
+        return jsonify({
+            'status': 'error', 
+            'msg': '⏳ Demasiados mensajes. Espera un momento.'
+        }), 429
+    
+    contenido = request.form.get('mensaje', '').strip()
+    
+    if not contenido:
         return jsonify({'status': 'error', 'msg': 'Mensaje vacío'}), 400
-
+    
+    # 2. ✅ MODERAR EL MENSAJE
+    resultado_moderacion = chat_moderator.procesar_mensaje(alumno_id, contenido)
+    
+    if not resultado_moderacion['permitido']:
+        # Mensaje bloqueado
+        return jsonify({
+            'status': 'bloqueado',
+            'tipo': resultado_moderacion['tipo_accion'],
+            'msg': resultado_moderacion['mensaje_sistema']
+        }), 403
+    
+    # 3. Mensaje aprobado, guardar en BD
     nuevo = Mensaje(
-        alumno_id=session['alumno_id'],
+        alumno_id=alumno_id,
         nombre_alumno=session['alumno_nombre'],
         grado_grupo=session['alumno_grado'],
         contenido=contenido

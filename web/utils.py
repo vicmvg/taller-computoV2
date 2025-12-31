@@ -579,3 +579,167 @@ def descargar_archivo(archivo_url, nombre_archivo, carpeta_local):
 s3_manager = S3Manager()
 file_validator = FileValidator()
 chat_limiter = RateLimiter(max_requests=10, window_seconds=60)  # Para limitar mensajes de chat
+
+class ChatModerator:
+    """Sistema de moderación de lenguaje para el chat"""
+    
+    def __init__(self):
+        # Lista de palabras prohibidas (puedes personalizarla)
+        self.palabras_prohibidas = {
+            # Insultos básicos
+            'pendejo', 'pendeja', 'idiota', 'estúpido', 'estúpida', 'imbécil',
+            'tonto', 'tonta', 'baboso', 'babosa', 'burro', 'burra',
+            
+            # Palabras antisonantes comunes
+            'puto', 'puta', 'verga', 'chingada', 'chingar', 'chingado',
+            'pinche', 'cabrón', 'cabrona', 'culero', 'culera', 'mamada',
+            'mierda', 'cagada', 'joder', 'coño', 'marica', 'maricon',
+            'perra', 'perro', 'zorra', 'hijo de puta', 'hdp',
+            
+            # Variaciones y evasiones comunes
+            'put0', 'p3ndje0', 'id10ta', 'c4br0n', 'put@', 'p3nd3j0',
+            'vrga', 'ch1ng4r', 'chngada', 'm13rd4', 'c0ñ0',
+            
+            # Abreviaciones
+            'alv', 'nmms', 'ptm', 'vete alv', 'vale verga',
+        }
+        
+        # Caracteres que se usan para evadir filtros
+        self.substituciones = {
+            '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's',
+            '@': 'a', '$': 's', '!': 'i', '7': 't', '8': 'b'
+        }
+    
+    def normalizar_texto(self, texto):
+        """Normaliza el texto para detectar evasiones"""
+        texto = texto.lower().strip()
+        
+        # Reemplazar números y símbolos por letras
+        for simbolo, letra in self.substituciones.items():
+            texto = texto.replace(simbolo, letra)
+        
+        # Eliminar espacios extras entre letras (p e n d e j o -> pendejo)
+        texto = ''.join(texto.split())
+        
+        return texto
+    
+    def detectar_palabras_prohibidas(self, mensaje):
+        """
+        Detecta palabras prohibidas en un mensaje
+        Retorna: (tiene_prohibidas: bool, palabras_encontradas: list)
+        """
+        texto_normalizado = self.normalizar_texto(mensaje)
+        palabras_encontradas = []
+        
+        for palabra_prohibida in self.palabras_prohibidas:
+            # Buscar la palabra completa o como parte de otra palabra
+            if palabra_prohibida in texto_normalizado:
+                palabras_encontradas.append(palabra_prohibida)
+        
+        return (len(palabras_encontradas) > 0, palabras_encontradas)
+    
+    def procesar_mensaje(self, alumno_id, mensaje):
+        """
+        Procesa un mensaje y aplica las reglas de moderación
+        
+        Retorna un diccionario:
+        {
+            'permitido': bool,
+            'tipo_accion': 'permitir' | 'advertencia' | 'bloqueo_temporal' | 'bloqueado',
+            'mensaje_sistema': str,
+            'palabras_detectadas': list
+        }
+        """
+        from web.models import InfraccionChat
+        from web.extensions import db
+        
+        # 1. Verificar si ya está bloqueado
+        bloqueo_activo = InfraccionChat.tiene_bloqueo_activo(alumno_id)
+        if bloqueo_activo:
+            tiempo_restante = bloqueo_activo.fecha_fin_bloqueo - datetime.utcnow()
+            horas = int(tiempo_restante.total_seconds() / 3600)
+            minutos = int((tiempo_restante.total_seconds() % 3600) / 60)
+            
+            return {
+                'permitido': False,
+                'tipo_accion': 'bloqueado',
+                'mensaje_sistema': f'🚫 Estás bloqueado del chat. Tiempo restante: {horas}h {minutos}m',
+                'palabras_detectadas': []
+            }
+        
+        # 2. Detectar palabras prohibidas
+        tiene_prohibidas, palabras = self.detectar_palabras_prohibidas(mensaje)
+        
+        if not tiene_prohibidas:
+            # Mensaje limpio, permitir
+            return {
+                'permitido': True,
+                'tipo_accion': 'permitir',
+                'mensaje_sistema': None,
+                'palabras_detectadas': []
+            }
+        
+        # 3. Contar infracciones recientes (últimos 30 días)
+        infracciones_previas = InfraccionChat.contar_infracciones_recientes(alumno_id, dias=30)
+        
+        # 4. Aplicar sistema de strikes
+        if infracciones_previas == 0:
+            # PRIMERA INFRACCIÓN: Advertencia
+            nueva_infraccion = InfraccionChat(
+                alumno_id=alumno_id,
+                tipo='advertencia',
+                mensaje_original=mensaje,
+                palabras_detectadas=', '.join(palabras)
+            )
+            db.session.add(nueva_infraccion)
+            db.session.commit()
+            
+            return {
+                'permitido': False,
+                'tipo_accion': 'advertencia',
+                'mensaje_sistema': '⚠️ ADVERTENCIA: No uses lenguaje inapropiado. Esta es tu primera advertencia.',
+                'palabras_detectadas': palabras
+            }
+        
+        elif infracciones_previas == 1:
+            # SEGUNDA INFRACCIÓN: Última advertencia
+            nueva_infraccion = InfraccionChat(
+                alumno_id=alumno_id,
+                tipo='advertencia',
+                mensaje_original=mensaje,
+                palabras_detectadas=', '.join(palabras)
+            )
+            db.session.add(nueva_infraccion)
+            db.session.commit()
+            
+            return {
+                'permitido': False,
+                'tipo_accion': 'advertencia',
+                'mensaje_sistema': '⚠️ ÚLTIMA ADVERTENCIA: Siguiente infracción = bloqueo de 24 horas.',
+                'palabras_detectadas': palabras
+            }
+        
+        else:
+            # TERCERA INFRACCIÓN O MÁS: Bloqueo de 24 horas
+            fecha_fin = datetime.utcnow() + timedelta(hours=24)
+            
+            nueva_infraccion = InfraccionChat(
+                alumno_id=alumno_id,
+                tipo='bloqueo_temporal',
+                mensaje_original=mensaje,
+                palabras_detectadas=', '.join(palabras),
+                fecha_fin_bloqueo=fecha_fin,
+                activa=True
+            )
+            db.session.add(nueva_infraccion)
+            db.session.commit()
+            
+            return {
+                'permitido': False,
+                'tipo_accion': 'bloqueo_temporal',
+                'mensaje_sistema': '🚫 HAS SIDO BLOQUEADO DEL CHAT POR 24 HORAS por uso reiterado de lenguaje inapropiado.',
+                'palabras_detectadas': palabras
+            }
+
+# Instancia global del moderador
+chat_moderator = ChatModerator()

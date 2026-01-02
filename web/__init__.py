@@ -42,7 +42,7 @@ def create_app():
         # 📚 NUEVO: Biblioteca
         libros_biblioteca = LibroDigital.query.filter_by(activo=True)\
             .order_by(LibroDigital.fecha_publicacion.desc())\
-            .limit(12)\  # ⬆️ CAMBIO: Agregar LIMIT 12
+            .limit(12)\ 
             .all()
 
         return render_template('index.html', 

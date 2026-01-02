@@ -40,6 +40,8 @@ class UsuarioAlumno(db.Model):
     asistencias = db.relationship('Asistencia', back_populates='alumno', cascade='all, delete-orphan')
     boletas = db.relationship('BoletaGenerada', back_populates='alumno', cascade='all, delete-orphan')
     pagos = db.relationship('Pago', back_populates='alumno', cascade='all, delete-orphan')
+    # NUEVO: Agregar relación con ApunteClase
+    apuntes = db.relationship('ApunteClase', back_populates='alumno', cascade='all, delete-orphan')
 
 class EntregaAlumno(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -458,3 +460,34 @@ class InfraccionChat(db.Model):
     
     def __repr__(self):
         return f'<InfraccionChat {self.tipo} - Alumno {self.alumno_id}>'
+
+class ApunteClase(db.Model):
+    """Apuntes personales de los alumnos sobre las clases"""
+    __tablename__ = 'apuntes_clase'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Información básica
+    fecha_clase = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    materia = db.Column(db.String(100), default='Computación')
+    tema = db.Column(db.String(200), nullable=False)
+    
+    # Secciones del apunte
+    de_que_trato = db.Column(db.Text, nullable=True)
+    conceptos_principales = db.Column(db.Text, nullable=True)
+    lo_que_aprendi = db.Column(db.Text, nullable=True)
+    mis_dudas = db.Column(db.Text, nullable=True)
+    lo_mejor = db.Column(db.Text, nullable=True)
+    tareas_seguimiento = db.Column(db.Text, nullable=True)
+    notas_adicionales = db.Column(db.Text, nullable=True)
+    
+    # Metadatos
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_modificacion = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relación con alumno usando back_populates
+    alumno = db.relationship('UsuarioAlumno', back_populates='apuntes')
+    
+    def __repr__(self):
+        return f'<ApunteClase {self.tema} - {self.fecha_clase}>'

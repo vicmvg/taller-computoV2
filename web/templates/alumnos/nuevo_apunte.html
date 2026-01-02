@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuevo Apunte - Taller de Cómputo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0d6efd 0%, #0b5ed7 100%);
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            margin: 5px 0;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        .sidebar .nav-link i {
+            width: 20px;
+            margin-right: 10px;
+        }
+        .card {
+            border-radius: 12px;
+            overflow: hidden;
+            border: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            border-bottom: 3px solid rgba(0,0,0,0.05);
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        textarea.form-control {
+            resize: vertical;
+            min-height: 80px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4"><i class="bi bi-pc-display-horizontal"></i> Taller</h4>
+                    <div class="d-flex align-items-center mb-4">
+                        {% if alumno.foto_perfil %}
+                        <img src="{{ url_for('alumno.ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                             alt="Foto" class="rounded-circle border border-3 border-white"
+                             style="width: 50px; height: 50px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" 
+                             style="width: 50px; height: 50px; color: #0d6efd; font-weight: bold; font-size: 1.2em;">
+                            {{ session.alumno_nombre[0] }}
+                        </div>
+                        {% endif %}
+                        <div class="ms-3">
+                            <h6 class="mb-0">{{ session.alumno_nombre }}</h6>
+                            <small>{{ session.alumno_grado }}</small>
+                        </div>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.dashboard') }}">
+                                <i class="bi bi-house-door"></i> Inicio
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="{{ url_for('alumno.mis_apuntes') }}">
+                                <i class="fas fa-book"></i> Mis Apuntes
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mis_cuestionarios') }}">
+                                <i class="bi bi-journal-check"></i> Cuestionarios
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mi_asistencia') }}">
+                                <i class="bi bi-calendar-check"></i> Asistencia
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mis_pagos') }}">
+                                <i class="bi bi-cash-coin"></i> Pagos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.ver_mis_archivos') }}">
+                                <i class="bi bi-folder-fill"></i> Mis Archivos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <!-- Flash Messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <a href="{{ url_for('alumno.mis_apuntes') }}" class="btn btn-outline-secondary mb-3">
+                    <i class="fas fa-arrow-left me-2"></i>Volver a mis apuntes
+                </a>
+                
+                <div class="text-center mb-4">
+                    <h2><i class="fas fa-pen-fancy me-2 text-primary"></i>Nuevo Apunte de Clase</h2>
+                    <p class="text-muted">Registra lo que aprendiste hoy</p>
+                </div>
+
+                <form method="POST" action="{{ url_for('alumno.nuevo_apunte') }}">
+                    <!-- Información básica -->
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>Información Básica</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="fecha_clase" class="form-label">
+                                        <i class="far fa-calendar-alt me-1"></i>Fecha de la clase *
+                                    </label>
+                                    <input type="date" class="form-control" id="fecha_clase" name="fecha_clase" 
+                                           value="{{ fecha_hoy }}" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="materia" class="form-label">
+                                        <i class="fas fa-graduation-cap me-1"></i>Materia
+                                    </label>
+                                    <input type="text" class="form-control" id="materia" name="materia" 
+                                           value="Computación" placeholder="Ej: Computación">
+                                </div>
+                                <div class="col-12 mb-3">
+                                    <label for="tema" class="form-label">
+                                        <i class="fas fa-lightbulb me-1"></i>Tema de la clase *
+                                    </label>
+                                    <input type="text" class="form-control" id="tema" name="tema" 
+                                           placeholder="Ej: Introducción a Python, Excel Básico, etc." required>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Contenido del apunte -->
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>Contenido de la Clase</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-4">
+                                <label for="de_que_trato" class="form-label">
+                                    <i class="fas fa-bookmark text-info me-1"></i>
+                                    <strong>¿De qué trató la clase?</strong>
+                                </label>
+                                <textarea class="form-control" id="de_que_trato" name="de_que_trato" 
+                                          rows="4" placeholder="Escribe un resumen general de lo que viste en clase..."></textarea>
+                                <small class="text-muted">Describe brevemente el tema principal de la clase</small>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="conceptos_principales" class="form-label">
+                                    <i class="fas fa-list-ul text-primary me-1"></i>
+                                    <strong>Conceptos principales</strong>
+                                </label>
+                                <textarea class="form-control" id="conceptos_principales" name="conceptos_principales" 
+                                          rows="4" placeholder="• Concepto 1&#10;• Concepto 2&#10;• Concepto 3"></textarea>
+                                <small class="text-muted">Lista los conceptos más importantes que se vieron</small>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="lo_que_aprendi" class="form-label">
+                                    <i class="fas fa-brain text-warning me-1"></i>
+                                    <strong>Lo que aprendí</strong>
+                                </label>
+                                <textarea class="form-control" id="lo_que_aprendi" name="lo_que_aprendi" 
+                                          rows="4" placeholder="Explica con tus propias palabras lo que aprendiste..."></textarea>
+                                <small class="text-muted">Reflexiona sobre tu aprendizaje</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dudas y reflexiones -->
+                    <div class="card">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="mb-0"><i class="fas fa-question-circle me-2"></i>Dudas y Reflexiones</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-4">
+                                <label for="mis_dudas" class="form-label">
+                                    <i class="fas fa-question text-danger me-1"></i>
+                                    <strong>Mis dudas sobre el tema</strong>
+                                </label>
+                                <textarea class="form-control" id="mis_dudas" name="mis_dudas" 
+                                          rows="3" placeholder="¿Qué no entendí? ¿Qué me gustaría aclarar?"></textarea>
+                                <small class="text-muted">Es importante identificar lo que no quedó claro</small>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="lo_mejor" class="form-label">
+                                    <i class="fas fa-star text-success me-1"></i>
+                                    <strong>Lo que mejor entendí</strong>
+                                </label>
+                                <textarea class="form-control" id="lo_mejor" name="lo_mejor" 
+                                          rows="3" placeholder="¿Qué parte de la clase me quedó más clara?"></textarea>
+                                <small class="text-muted">Identifica tus fortalezas</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tareas y notas adicionales -->
+                    <div class="card">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0"><i class="fas fa-tasks me-2"></i>Seguimiento</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-4">
+                                <label for="tareas_seguimiento" class="form-label">
+                                    <i class="fas fa-check-square text-success me-1"></i>
+                                    <strong>Tareas o seguimiento</strong>
+                                </label>
+                                <textarea class="form-control" id="tareas_seguimiento" name="tareas_seguimiento" 
+                                          rows="3" placeholder="¿Hay tarea? ¿Qué debo practicar?"></textarea>
+                                <small class="text-muted">Anota las tareas o cosas que debes practicar</small>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="notas_adicionales" class="form-label">
+                                    <i class="fas fa-sticky-note text-secondary me-1"></i>
+                                    <strong>Notas adicionales</strong>
+                                </label>
+                                <textarea class="form-control" id="notas_adicionales" name="notas_adicionales" 
+                                          rows="3" placeholder="Cualquier otra nota o comentario..."></textarea>
+                                <small class="text-muted">Espacio libre para cualquier observación</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botones -->
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <button type="submit" class="btn btn-primary btn-lg px-5">
+                                <i class="fas fa-save me-2"></i>Guardar Apunte
+                            </button>
+                            <a href="{{ url_for('alumno.mis_apuntes') }}" class="btn btn-outline-secondary btn-lg px-5 ms-2">
+                                <i class="fas fa-times me-2"></i>Cancelar
+                            </a>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

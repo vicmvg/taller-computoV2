@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mis Apuntes - Taller de Cómputo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0d6efd 0%, #0b5ed7 100%);
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            margin: 5px 0;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        .sidebar .nav-link i {
+            width: 20px;
+            margin-right: 10px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border: none;
+        }
+        .bg-gradient-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .hover-shadow {
+            transition: all 0.3s ease;
+        }
+        .hover-shadow:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4"><i class="bi bi-pc-display-horizontal"></i> Taller</h4>
+                    <div class="d-flex align-items-center mb-4">
+                        {% if alumno.foto_perfil %}
+                        <img src="{{ url_for('alumno.ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                             alt="Foto" class="rounded-circle border border-3 border-white"
+                             style="width: 50px; height: 50px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" 
+                             style="width: 50px; height: 50px; color: #0d6efd; font-weight: bold; font-size: 1.2em;">
+                            {{ session.alumno_nombre[0] }}
+                        </div>
+                        {% endif %}
+                        <div class="ms-3">
+                            <h6 class="mb-0">{{ session.alumno_nombre }}</h6>
+                            <small>{{ session.alumno_grado }}</small>
+                        </div>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.dashboard') }}">
+                                <i class="bi bi-house-door"></i> Inicio
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="{{ url_for('alumno.mis_apuntes') }}">
+                                <i class="fas fa-book"></i> Mis Apuntes
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mis_cuestionarios') }}">
+                                <i class="bi bi-journal-check"></i> Cuestionarios
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mi_asistencia') }}">
+                                <i class="bi bi-calendar-check"></i> Asistencia
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mis_pagos') }}">
+                                <i class="bi bi-cash-coin"></i> Pagos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.ver_mis_archivos') }}">
+                                <i class="bi bi-folder-fill"></i> Mis Archivos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <!-- Flash Messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <!-- Header -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h2><i class="fas fa-book me-2"></i>Mis Apuntes de Clase</h2>
+                                <p class="text-muted">Organiza y revisa tus notas de cada clase</p>
+                            </div>
+                            <a href="{{ url_for('alumno.nuevo_apunte') }}" class="btn btn-primary">
+                                <i class="fas fa-plus-circle me-2"></i>Nuevo Apunte
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lista de Apuntes -->
+                {% if apuntes %}
+                <div class="row">
+                    {% for apunte in apuntes %}
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card h-100 shadow-sm hover-shadow">
+                            <div class="card-header bg-gradient-primary text-white">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <small><i class="far fa-calendar-alt me-1"></i>{{ apunte.fecha_clase.strftime('%d/%m/%Y') }}</small>
+                                    <span class="badge bg-light text-dark">{{ apunte.materia }}</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title text-truncate" title="{{ apunte.tema }}">
+                                    <i class="fas fa-lightbulb text-warning me-2"></i>{{ apunte.tema }}
+                                </h5>
+                                
+                                {% if apunte.de_que_trato %}
+                                <p class="card-text text-muted small" style="
+                                    display: -webkit-box;
+                                    -webkit-line-clamp: 3;
+                                    -webkit-box-orient: vertical;
+                                    overflow: hidden;
+                                ">{{ apunte.de_que_trato }}</p>
+                                {% else %}
+                                <p class="card-text text-muted small fst-italic">Sin resumen</p>
+                                {% endif %}
+                                
+                                <div class="mt-3">
+                                    {% if apunte.mis_dudas %}
+                                    <span class="badge bg-warning text-dark me-1" title="Tienes dudas registradas">
+                                        <i class="fas fa-question-circle"></i> Dudas
+                                    </span>
+                                    {% endif %}
+                                    {% if apunte.tareas_seguimiento %}
+                                    <span class="badge bg-info me-1" title="Tienes tareas pendientes">
+                                        <i class="fas fa-tasks"></i> Tareas
+                                    </span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="card-footer bg-light">
+                                <div class="d-flex justify-content-between">
+                                    <a href="{{ url_for('alumno.ver_apunte', apunte_id=apunte.id) }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="fas fa-eye me-1"></i>Ver
+                                    </a>
+                                    <div>
+                                        <a href="{{ url_for('alumno.editar_apunte', apunte_id=apunte.id) }}" class="btn btn-sm btn-outline-secondary">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="confirmarEliminar({{ apunte.id }})">
+                                            <i class="fas fa-trash-alt"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card shadow-sm">
+                            <div class="card-body text-center py-5">
+                                <i class="fas fa-book-open fa-4x text-muted mb-3"></i>
+                                <h4 class="text-muted">Aún no tienes apuntes</h4>
+                                <p class="text-muted">Comienza a tomar notas de tus clases para organizar mejor tu aprendizaje</p>
+                                <a href="{{ url_for('alumno.nuevo_apunte') }}" class="btn btn-primary mt-3">
+                                    <i class="fas fa-plus-circle me-2"></i>Crear mi primer apunte
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación para eliminar -->
+    <div class="modal fade" id="modalEliminar" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Confirmar Eliminación</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>¿Estás seguro de que deseas eliminar este apunte?</p>
+                    <p class="text-danger small"><strong>Esta acción no se puede deshacer.</strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <form id="formEliminar" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-danger">
+                            <i class="fas fa-trash-alt me-1"></i>Eliminar
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function confirmarEliminar(apunteId) {
+            const form = document.getElementById('formEliminar');
+            form.action = `/alumnos/apuntes/${apunteId}/eliminar`;
+            const modal = new bootstrap.Modal(document.getElementById('modalEliminar'));
+            modal.show();
+        }
+    </script>
+</body>
+</html>

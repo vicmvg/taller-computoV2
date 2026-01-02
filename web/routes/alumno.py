@@ -1,6 +1,6 @@
 # web/routes/alumno.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, send_file, send_from_directory
-from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion, Encuesta, RespuestaEncuesta
+from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion, Encuesta, RespuestaEncuesta, ApunteClase
 from web.extensions import db
 from web.utils import require_alumno, s3_manager, file_validator, guardar_archivo, chat_limiter, log_error, chat_moderator
 from datetime import datetime
@@ -36,9 +36,11 @@ def dashboard():
 @alumno_bp.route('/entregas')
 @require_alumno
 def mis_entregas():
+    """Ver todas las entregas del alumno"""
     alumno_id = session.get('alumno_id')
-    entregas = EntregaAlumno.query.filter_by(alumno_id=alumno_id).all()
-    return render_template('alumno/entregas.html', entregas=entregas)
+    entregas = EntregaAlumno.query.filter_by(alumno_id=alumno_id).order_by(EntregaAlumno.fecha_entrega.desc()).all()
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    return render_template('alumnos/entregas.html', entregas=entregas, alumno=alumno)
 
 @alumno_bp.route('/subir-tarea', methods=['POST'])
 @require_alumno
@@ -532,6 +534,160 @@ def responder_encuesta(encuesta_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# =============================================================================
+# APUNTES DE CLASE - RUTAS
+# =============================================================================
+
+@alumno_bp.route('/apuntes')
+@require_alumno
+def mis_apuntes():
+    """Ver todos los apuntes del alumno"""
+    alumno_id = session.get('alumno_id')
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    
+    # Obtener todos los apuntes ordenados por fecha más reciente
+    apuntes = ApunteClase.query.filter_by(
+        alumno_id=alumno_id
+    ).order_by(ApunteClase.fecha_clase.desc()).all()
+    
+    return render_template('alumnos/apuntes.html', apuntes=apuntes, alumno=alumno)
+
+
+@alumno_bp.route('/apuntes/nuevo', methods=['GET', 'POST'])
+@require_alumno
+def nuevo_apunte():
+    """Crear un nuevo apunte"""
+    if request.method == 'POST':
+        try:
+            alumno_id = session.get('alumno_id')
+            
+            # Obtener datos del formulario
+            fecha_clase = request.form.get('fecha_clase')
+            materia = request.form.get('materia', 'Computación')
+            tema = request.form.get('tema', '').strip()
+            
+            # Validar que al menos tenga tema
+            if not tema:
+                flash('⚠️ El tema de la clase es obligatorio', 'warning')
+                return redirect(url_for('alumno.nuevo_apunte'))
+            
+            # Crear apunte
+            nuevo_apunte = ApunteClase(
+                alumno_id=alumno_id,
+                fecha_clase=datetime.strptime(fecha_clase, '%Y-%m-%d').date() if fecha_clase else datetime.now().date(),
+                materia=materia,
+                tema=tema,
+                de_que_trato=request.form.get('de_que_trato', '').strip() or None,
+                conceptos_principales=request.form.get('conceptos_principales', '').strip() or None,
+                lo_que_aprendi=request.form.get('lo_que_aprendi', '').strip() or None,
+                mis_dudas=request.form.get('mis_dudas', '').strip() or None,
+                lo_mejor=request.form.get('lo_mejor', '').strip() or None,
+                tareas_seguimiento=request.form.get('tareas_seguimiento', '').strip() or None,
+                notas_adicionales=request.form.get('notas_adicionales', '').strip() or None
+            )
+            
+            db.session.add(nuevo_apunte)
+            db.session.commit()
+            
+            flash('📝 ¡Apunte guardado exitosamente!', 'success')
+            return redirect(url_for('alumno.mis_apuntes'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al guardar el apunte: {str(e)}', 'danger')
+            return redirect(url_for('alumno.nuevo_apunte'))
+    
+    # GET - Mostrar formulario
+    alumno = UsuarioAlumno.query.get(session.get('alumno_id'))
+    return render_template('alumnos/nuevo_apunte.html', alumno=alumno, fecha_hoy=datetime.now().strftime('%Y-%m-%d'))
+
+
+@alumno_bp.route('/apuntes/<int:apunte_id>')
+@require_alumno
+def ver_apunte(apunte_id):
+    """Ver un apunte específico"""
+    alumno_id = session.get('alumno_id')
+    apunte = ApunteClase.query.get_or_404(apunte_id)
+    
+    # Verificar que el apunte pertenece al alumno
+    if apunte.alumno_id != alumno_id:
+        flash('⚠️ No tienes permiso para ver este apunte', 'danger')
+        return redirect(url_for('alumno.mis_apuntes'))
+    
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    return render_template('alumnos/ver_apunte.html', apunte=apunte, alumno=alumno)
+
+
+@alumno_bp.route('/apuntes/<int:apunte_id>/editar', methods=['GET', 'POST'])
+@require_alumno
+def editar_apunte(apunte_id):
+    """Editar un apunte existente"""
+    alumno_id = session.get('alumno_id')
+    apunte = ApunteClase.query.get_or_404(apunte_id)
+    
+    # Verificar que el apunte pertenece al alumno
+    if apunte.alumno_id != alumno_id:
+        flash('⚠️ No tienes permiso para editar este apunte', 'danger')
+        return redirect(url_for('alumno.mis_apuntes'))
+    
+    if request.method == 'POST':
+        try:
+            # Actualizar campos
+            fecha_clase = request.form.get('fecha_clase')
+            tema = request.form.get('tema', '').strip()
+            
+            if not tema:
+                flash('⚠️ El tema de la clase es obligatorio', 'warning')
+                return redirect(url_for('alumno.editar_apunte', apunte_id=apunte_id))
+            
+            apunte.fecha_clase = datetime.strptime(fecha_clase, '%Y-%m-%d').date() if fecha_clase else apunte.fecha_clase
+            apunte.materia = request.form.get('materia', 'Computación')
+            apunte.tema = tema
+            apunte.de_que_trato = request.form.get('de_que_trato', '').strip() or None
+            apunte.conceptos_principales = request.form.get('conceptos_principales', '').strip() or None
+            apunte.lo_que_aprendi = request.form.get('lo_que_aprendi', '').strip() or None
+            apunte.mis_dudas = request.form.get('mis_dudas', '').strip() or None
+            apunte.lo_mejor = request.form.get('lo_mejor', '').strip() or None
+            apunte.tareas_seguimiento = request.form.get('tareas_seguimiento', '').strip() or None
+            apunte.notas_adicionales = request.form.get('notas_adicionales', '').strip() or None
+            apunte.fecha_modificacion = datetime.utcnow()
+            
+            db.session.commit()
+            
+            flash('✅ ¡Apunte actualizado exitosamente!', 'success')
+            return redirect(url_for('alumno.ver_apunte', apunte_id=apunte_id))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al actualizar el apunte: {str(e)}', 'danger')
+            return redirect(url_for('alumno.editar_apunte', apunte_id=apunte_id))
+    
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    return render_template('alumnos/editar_apunte.html', apunte=apunte, alumno=alumno)
+
+
+@alumno_bp.route('/apuntes/<int:apunte_id>/eliminar', methods=['POST'])
+@require_alumno
+def eliminar_apunte(apunte_id):
+    """Eliminar un apunte"""
+    alumno_id = session.get('alumno_id')
+    apunte = ApunteClase.query.get_or_404(apunte_id)
+    
+    # Verificar que el apunte pertenece al alumno
+    if apunte.alumno_id != alumno_id:
+        flash('⚠️ No tienes permiso para eliminar este apunte', 'danger')
+        return redirect(url_for('alumno.mis_apuntes'))
+    
+    try:
+        db.session.delete(apunte)
+        db.session.commit()
+        flash('🗑️ Apunte eliminado correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al eliminar: {str(e)}', 'danger')
+    
+    return redirect(url_for('alumno.mis_apuntes'))
 
 @alumno_bp.route('/logout')
 def logout():

@@ -1,7 +1,7 @@
 # web/__init__.py
 from flask import Flask, redirect, url_for, render_template, send_file, send_from_directory, flash
 from .config import Config
-from .extensions import db
+from .extensions import db, cache  # ⬆️ CAMBIO: Agregar cache al import
 from .routes.auth import auth_bp
 from .routes.admin import admin_bp
 from .routes.alumno import alumno_bp
@@ -20,6 +20,9 @@ def create_app():
 
     # 3. Inicializamos la base de datos
     db.init_app(app)
+    
+    # ⬆️ CAMBIO: Inicializar caché
+    cache.init_app(app)
 
     # 4. Registramos los Blueprints
     app.register_blueprint(auth_bp, url_prefix='/auth')
@@ -28,16 +31,18 @@ def create_app():
 
     # 5. RUTA PRINCIPAL - INDEX con datos
     @app.route('/')
+    @cache.cached(timeout=60, key_prefix='index_page')  # ⬆️ CAMBIO: Agregar decorador de caché
     def index():
         """Página principal del sitio"""
         anuncios = Anuncio.query.order_by(Anuncio.fecha.desc()).limit(5).all()
         horarios = Horario.query.all()
         plataformas = Plataforma.query.all()
-        recursos = Recurso.query.order_by(Recurso.fecha.desc()).all()
+        recursos = Recurso.query.order_by(Recurso.fecha.desc()).limit(10).all()  # ⬆️ CAMBIO: Agregar LIMIT 10
         
         # 📚 NUEVO: Biblioteca
         libros_biblioteca = LibroDigital.query.filter_by(activo=True)\
             .order_by(LibroDigital.fecha_publicacion.desc())\
+            .limit(12)\  # ⬆️ CAMBIO: Agregar LIMIT 12
             .all()
 
         return render_template('index.html', 
@@ -49,6 +54,7 @@ def create_app():
     
     # 6. RUTA PARA VER GRADOS
     @app.route('/grado/<int:numero_grado>')
+    @cache.cached(timeout=300, key_prefix='grado_%s')  # ⬆️ CAMBIO: Agregar decorador de caché
     def ver_grado(numero_grado):
         """Ver actividades de un grado específico"""
         actividad = ActividadGrado.query.filter_by(grado=numero_grado).first()
@@ -56,6 +62,7 @@ def create_app():
     
     # 7. 🆕 RUTA PARA VER ARCHIVOS CON URLs FIRMADAS (iDrive e2)
     @app.route('/ver-archivo/<path:archivo_path>')
+    @cache.cached(timeout=3600, key_prefix='archivo_%s')  # ⬆️ CAMBIO: Agregar decorador de caché
     def ver_archivo(archivo_path):
         """Permite ver/descargar archivos con URLs firmadas para iDrive e2"""
         try:

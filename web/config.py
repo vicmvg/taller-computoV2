@@ -1,4 +1,3 @@
-# web/config.py
 import os
 
 class Config:
@@ -19,10 +18,10 @@ class Config:
     if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
         SQLALCHEMY_ENGINE_OPTIONS = {
             'pool_pre_ping': True,
-            'pool_recycle': 280,
-            'pool_size': 5,
-            'max_overflow': 10,
-            'pool_timeout': 30,
+            'pool_recycle': 1800,          # ⬆️ CAMBIO: 280 → 1800
+            'pool_size': 10,               # ⬆️ CAMBIO: 5 → 10
+            'max_overflow': 15,            # ⬆️ CAMBIO: 10 → 15
+            'pool_timeout': 60,            # ⬆️ CAMBIO: 30 → 60
             'connect_args': {
                 'connect_timeout': 10,
                 'keepalives': 1,
@@ -41,3 +40,7 @@ class Config:
     # Upload Config
     UPLOAD_FOLDER = 'uploads'
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+    
+    # Cache Config
+    CACHE_TYPE = 'SimpleCache'
+    CACHE_DEFAULT_TIMEOUT = 300

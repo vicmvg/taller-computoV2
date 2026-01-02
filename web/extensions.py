@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+from flask_caching import Cache
 
-# Creamos la instancia de SQLAlchemy de forma aislada.
-# Más adelante, la "uniremos" a la aplicación en el archivo de inicio.
 db = SQLAlchemy()
+cache = Cache()

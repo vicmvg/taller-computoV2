@@ -40,7 +40,6 @@ class UsuarioAlumno(db.Model):
     asistencias = db.relationship('Asistencia', back_populates='alumno', cascade='all, delete-orphan')
     boletas = db.relationship('BoletaGenerada', back_populates='alumno', cascade='all, delete-orphan')
     pagos = db.relationship('Pago', back_populates='alumno', cascade='all, delete-orphan')
-    # NUEVO: Agregar relación con ApunteClase
     apuntes = db.relationship('ApunteClase', back_populates='alumno', cascade='all, delete-orphan')
 
 class EntregaAlumno(db.Model):
@@ -221,8 +220,8 @@ class SolicitudArchivo(db.Model):
     fecha_solicitud = db.Column(db.DateTime, default=datetime.now)
     fecha_respuesta = db.Column(db.DateTime, nullable=True)
     
-    # Relación con alumno usando backref (se mantiene aquí)
-    alumno = db.relationship('UsuarioAlumno', backref='solicitudes_archivos')
+    # ✅ CORREGIDO: Agregado cascade en backref
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('solicitudes_archivos', cascade='all, delete-orphan'))
 
 class ArchivoEnviado(db.Model):
     """Archivos PDF que el profesor envía a los alumnos"""
@@ -244,8 +243,8 @@ class ArchivoEnviado(db.Model):
     
     enviado_por = db.Column(db.String(100), nullable=False)
     
-    # Relaciones usando backref (se mantienen aquí)
-    alumno = db.relationship('UsuarioAlumno', backref='archivos_recibidos')
+    # ✅ CORREGIDO: Agregado cascade en backref
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('archivos_recibidos', cascade='all, delete-orphan'))
     solicitud = db.relationship('SolicitudArchivo', backref='archivo_respuesta', uselist=False)
 
 class Encuesta(db.Model):
@@ -322,8 +321,8 @@ class RespuestaEncuesta(db.Model):
     # Metadatos
     fecha_respuesta = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Relaciones
-    alumno = db.relationship('UsuarioAlumno', backref='respuestas_encuestas')
+    # ✅ CORREGIDO: Agregado cascade en backref
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('respuestas_encuestas', cascade='all, delete-orphan'))
     
     def promedio_respuestas(self):
         """Calcula el promedio de las respuestas numéricas"""
@@ -433,7 +432,7 @@ class InfraccionChat(db.Model):
     fecha_fin_bloqueo = db.Column(db.DateTime, nullable=True)  # Cuándo termina el bloqueo
     activa = db.Column(db.Boolean, default=True)  # Si el bloqueo sigue vigente
     
-    # Relación con alumno
+    # ✅ CORREGIDO: Agregado cascade en backref
     alumno = db.relationship('UsuarioAlumno', backref=db.backref('infracciones_chat', cascade='all, delete-orphan'))
     
     @staticmethod

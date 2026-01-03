@@ -434,7 +434,7 @@ class InfraccionChat(db.Model):
     activa = db.Column(db.Boolean, default=True)  # Si el bloqueo sigue vigente
     
     # Relación con alumno
-    alumno = db.relationship('UsuarioAlumno', backref='infracciones_chat')
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('infracciones_chat', cascade='all, delete-orphan'))
     
     @staticmethod
     def contar_infracciones_recientes(alumno_id, dias=30):

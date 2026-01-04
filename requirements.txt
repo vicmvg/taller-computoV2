@@ -11,4 +11,6 @@ werkzeug
 reportlab
 python-magic==0.4.27
 flask-caching
-
+flask-socketio==5.3.6
+python-socketio==5.11.0
+eventlet==0.33.3

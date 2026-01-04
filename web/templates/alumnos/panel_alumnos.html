@@ -7,6 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         .sidebar {
             min-height: 100vh;
@@ -167,6 +169,29 @@
             .mensaje-flotante {
                 max-width: none;
             }
+        }
+
+        /* Estilos para las estrellas de rating */
+        .rating-stars {
+            font-size: 2.5rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .rating-stars i {
+            color: #ddd;
+            transition: all 0.2s;
+            margin: 0 5px;
+        }
+
+        .rating-stars i:hover,
+        .rating-stars i.active {
+            color: #ffc107;
+            transform: scale(1.2);
+        }
+
+        .modal-dialog-scrollable .modal-body {
+            max-height: calc(100vh - 200px);
         }
     </style>
 </head>
@@ -553,6 +578,9 @@
                         </div>
                     </div>
 
+                    <!-- Indicador de "está escribiendo" -->
+                    <div id="indicadorEscribiendo" class="text-muted small ps-3" style="min-height: 20px;"></div>
+
                     <div class="card-footer bg-white position-relative">
                         
                         <div class="emoji-picker" id="emojiMenu" style="display: none; position: absolute; bottom: 100%; left: 10px; background: white; border: 1px solid #ccc; padding: 10px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 9999; width: 260px; grid-template-columns: repeat(6, 1fr); gap: 5px;">
@@ -683,7 +711,6 @@
 
     <!-- ============================================================================ -->
     <!-- MODAL BLOQUEANTE DE ENCUESTA -->
-    <!-- Agregar este código ANTES del cierre </body> en panel_alumnos.html -->
     <!-- ============================================================================ -->
 
     <!-- Modal de Encuesta (Bloqueante) -->
@@ -866,31 +893,6 @@
         </div>
     </div>
 
-    <!-- Estilos para las estrellas de rating -->
-    <style>
-    .rating-stars {
-        font-size: 2.5rem;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .rating-stars i {
-        color: #ddd;
-        transition: all 0.2s;
-        margin: 0 5px;
-    }
-
-    .rating-stars i:hover,
-    .rating-stars i.active {
-        color: #ffc107;
-        transform: scale(1.2);
-    }
-
-    .modal-dialog-scrollable .modal-body {
-        max-height: calc(100vh - 200px);
-    }
-    </style>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- 🆕 SCRIPT PARA PREVISUALIZAR FOTO -->
@@ -907,29 +909,61 @@
             }
         }
     </script>
-    
+
+    <!-- ============================================================================ -->
+    <!-- CHAT CON WEBSOCKETS - REEMPLAZAR TODO EL SCRIPT DEL CHAT -->
+    <!-- ============================================================================ -->
     <script>
+        let socket = null;
         let chatBloqueado = false;
+        let timeoutEscribiendo = null;
 
-        // Función para bajar el scroll automáticamente
-        function scrollAlFondo() {
-            const caja = document.getElementById('cajaMensajes');
-            caja.scrollTop = caja.scrollHeight;
-        }
+        // Inicializar conexión WebSocket
+        document.addEventListener('DOMContentLoaded', function() {
+            inicializarChat();
+        });
 
-        // 1. CARGAR MENSAJES
-        async function actualizarChat() {
-            try {
-                const respuesta = await fetch('/alumnos/api/chat/obtener');
-                const datos = await respuesta.json();
+        function inicializarChat() {
+            // Conectar a Socket.IO
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+            
+            // ========== EVENTOS DE CONEXIÓN ==========
+            
+            socket.on('connect', function() {
+                console.log('✅ Conectado al chat en tiempo real');
+                document.getElementById('statusChat').textContent = 'Conectado';
+                document.getElementById('statusChat').className = 'badge bg-success';
                 
+                // Cargar mensajes del grupo
+                socket.emit('cargar_mensajes');
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('❌ Desconectado del chat');
+                document.getElementById('statusChat').textContent = 'Desconectado';
+                document.getElementById('statusChat').className = 'badge bg-danger';
+            });
+            
+            socket.on('connect_error', function(error) {
+                console.error('Error de conexión:', error);
+                document.getElementById('statusChat').textContent = 'Error';
+                document.getElementById('statusChat').className = 'badge bg-warning';
+            });
+            
+            // ========== EVENTOS DE MENSAJES ==========
+            
+            socket.on('mensajes_cargados', function(data) {
                 const caja = document.getElementById('cajaMensajes');
                 const input = document.getElementById('inputMensaje');
                 const aviso = document.getElementById('avisoBloqueo');
                 
-                // ✅ CORRECTO - VERIFICACIÓN EXPLÍCITA DEL CAMPO 'activo'
-                // Manejo del bloqueo - IMPORTANTE: Verifica el campo 'activo'
-                if (!datos.activo) {
+                // Manejar estado del chat
+                if (!data.activo) {
                     input.disabled = true;
                     input.placeholder = "Chat desactivado";
                     aviso.style.display = 'block';
@@ -940,96 +974,189 @@
                     aviso.style.display = 'none';
                     chatBloqueado = false;
                 }
-
-                // Dibujar mensajes
-                let html = '';
-                if(datos.mensajes.length === 0) {
-                    html = '<div class="text-center text-muted mt-4"><small>Sé el primero en escribir.</small></div>';
-                } else {
-                    datos.mensajes.forEach(msg => {
-                        // Estilo diferente si soy yo o es otro
-                        let clase = msg.es_mio ? 'justify-content-end' : 'justify-content-start';
-                        let color = msg.es_mio ? 'bg-primary text-white' : 'bg-white text-dark border';
-                        
-                        html += `
-                            <div class="d-flex ${clase} mb-2">
-                                <div class="px-3 py-2 rounded-3 shadow-sm ${color}" style="max-width: 75%;">
-                                    <small class="d-block fw-bold opacity-75" style="font-size: 0.7rem;">
-                                        ${msg.nombre}
-                                    </small>
-                                    <span>${msg.texto}</span>
-                                    <small class="d-block text-end opacity-50" style="font-size: 0.6rem;">${msg.hora}</small>
-                                </div>
-                            </div>
-                        `;
-                    });
+                
+                // Renderizar mensajes
+                renderizarMensajes(data.mensajes);
+            });
+            
+            socket.on('nuevo_mensaje', function(mensaje) {
+                agregarMensaje(mensaje);
+            });
+            
+            socket.on('mensaje_bloqueado', function(data) {
+                mostrarAlertaModeracion(data.tipo, data.msg);
+                
+                if (data.tipo === 'bloqueo_temporal' || data.tipo === 'chat_desactivado') {
+                    chatBloqueado = true;
+                    document.getElementById('inputMensaje').disabled = true;
+                    document.getElementById('inputMensaje').placeholder = "Chat bloqueado";
+                    document.getElementById('avisoBloqueo').style.display = 'block';
+                    document.getElementById('avisoBloqueo').innerHTML = 
+                        `<small><i class="fas fa-ban"></i> ${data.msg}</small>`;
                 }
-                
-                // Solo actualizamos el HTML si cambió algo (para evitar parpadeos masivos)
-                // En esta versión simple reemplazamos todo, pero guardamos la posición del scroll
-                const estabaAbajo = caja.scrollHeight - caja.scrollTop === caja.clientHeight;
-                caja.innerHTML = html;
-                
-                if(estabaAbajo) scrollAlFondo(); // Solo bajar si el usuario ya estaba abajo
-
-            } catch (error) {
-                console.error("Error cargando chat", error);
-            }
+            });
+            
+            socket.on('error', function(data) {
+                mostrarAlertaTemporal(data.msg, 'danger');
+            });
+            
+            // ========== EVENTOS DE USUARIOS ==========
+            
+            socket.on('usuario_conectado', function(data) {
+                mostrarNotificacionUsuario(`${data.nombre} se conectó`, 'success');
+                actualizarContadorUsuarios(data.total_conectados);
+            });
+            
+            socket.on('usuario_desconectado', function(data) {
+                mostrarNotificacionUsuario(`${data.nombre} se desconectó`, 'secondary');
+                actualizarContadorUsuarios(data.total_conectados);
+            });
+            
+            socket.on('usuarios_conectados', function(data) {
+                actualizarContadorUsuarios(data.usuarios.length);
+            });
+            
+            socket.on('usuarios_escribiendo', function(data) {
+                mostrarIndicadorEscribiendo(data.usuarios);
+            });
+            
+            // ========== HEARTBEAT ==========
+            setInterval(() => {
+                if (socket && socket.connected) {
+                    socket.emit('ping');
+                }
+            }, 30000);
         }
 
-        // 2. ENVIAR MENSAJE (con manejo de moderación)
-        async function enviarMensaje(e) {
+        // ========== FUNCIONES DE RENDERIZADO ==========
+
+        function renderizarMensajes(mensajes) {
+            const caja = document.getElementById('cajaMensajes');
+            
+            if (mensajes.length === 0) {
+                caja.innerHTML = '<div class="text-center text-muted mt-4"><small>Sé el primero en escribir.</small></div>';
+                return;
+            }
+            
+            let html = '';
+            mensajes.forEach(msg => {
+                html += crearHtmlMensaje(msg);
+            });
+            
+            caja.innerHTML = html;
+            scrollAlFondo();
+        }
+
+        function agregarMensaje(mensaje) {
+            const caja = document.getElementById('cajaMensajes');
+            
+            // Si estaba vacío, limpiar el mensaje de "sé el primero"
+            if (caja.querySelector('.text-center.text-muted')) {
+                caja.innerHTML = '';
+            }
+            
+            // Agregar el nuevo mensaje
+            const html = crearHtmlMensaje(mensaje);
+            caja.insertAdjacentHTML('beforeend', html);
+            
+            scrollAlFondo();
+        }
+
+        function crearHtmlMensaje(msg) {
+            const clase = msg.es_mio ? 'justify-content-end' : 'justify-content-start';
+            const color = msg.es_mio ? 'bg-primary text-white' : 'bg-white text-dark border';
+            
+            return `
+                <div class="d-flex ${clase} mb-2">
+                    <div class="px-3 py-2 rounded-3 shadow-sm ${color}" style="max-width: 75%;">
+                        <small class="d-block fw-bold opacity-75" style="font-size: 0.7rem;">
+                            ${msg.nombre}
+                        </small>
+                        <span>${msg.texto}</span>
+                        <small class="d-block text-end opacity-50" style="font-size: 0.6rem;">${msg.hora}</small>
+                    </div>
+                </div>
+            `;
+        }
+
+        function scrollAlFondo() {
+            const caja = document.getElementById('cajaMensajes');
+            caja.scrollTop = caja.scrollHeight;
+        }
+
+        // ========== ENVIAR MENSAJE ==========
+
+        function enviarMensaje(e) {
             e.preventDefault();
+            
+            if (!socket || !socket.connected) {
+                mostrarAlertaTemporal('⚠️ No estás conectado al chat', 'warning');
+                return;
+            }
+            
             const input = document.getElementById('inputMensaje');
             const texto = input.value.trim();
             
             if (!texto || chatBloqueado) return;
-
-            // Limpiar input visualmente rápido
-            input.value = '';
-
-            // Enviar al servidor
-            const formData = new FormData();
-            formData.append('mensaje', texto);
             
-            try {
-                const respuesta = await fetch('/alumnos/api/chat/enviar', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const datos = await respuesta.json();
-                
-                // Manejar diferentes respuestas
-                if (respuesta.status === 403) {
-                    // Mensaje bloqueado por moderación
-                    mostrarAlertaModeracion(datos.tipo, datos.msg);
-                    
-                    // Si fue bloqueado, actualizar UI
-                    if (datos.tipo === 'bloqueo_temporal' || datos.tipo === 'bloqueado') {
-                        chatBloqueado = true;
-                        input.disabled = true;
-                        input.placeholder = "Chat bloqueado";
-                        document.getElementById('avisoBloqueo').style.display = 'block';
-                        document.getElementById('avisoBloqueo').innerHTML = 
-                            `<small><i class="fas fa-ban"></i> ${datos.msg}</small>`;
-                    }
-                } else if (respuesta.status === 429) {
-                    // Rate limit
-                    mostrarAlertaTemporal('⏳ Espera un momento antes de enviar otro mensaje', 'warning');
-                } else if (datos.status === 'ok') {
-                    // Mensaje enviado exitosamente
-                    actualizarChat();
-                    setTimeout(scrollAlFondo, 200);
-                }
-                
-            } catch (error) {
-                console.error("Error al enviar mensaje", error);
-                mostrarAlertaTemporal('❌ Error al enviar mensaje', 'danger');
+            // Limpiar input
+            input.value = '';
+            
+            // Enviar mensaje por WebSocket
+            socket.emit('enviar_mensaje', {
+                mensaje: texto
+            });
+            
+            // Detener indicador de "escribiendo"
+            socket.emit('usuario_escribiendo', { escribiendo: false });
+        }
+
+        // ========== INDICADOR "ESTÁ ESCRIBIENDO" ==========
+
+        function onInputChange() {
+            if (!socket || !socket.connected || chatBloqueado) return;
+            
+            // Notificar que está escribiendo
+            socket.emit('usuario_escribiendo', { escribiendo: true });
+            
+            // Resetear timeout
+            clearTimeout(timeoutEscribiendo);
+            
+            // Después de 2 segundos sin escribir, dejar de notificar
+            timeoutEscribiendo = setTimeout(() => {
+                socket.emit('usuario_escribiendo', { escribiendo: false });
+            }, 2000);
+        }
+
+        // Agregar listener al input
+        document.getElementById('inputMensaje').addEventListener('input', onInputChange);
+
+        function mostrarIndicadorEscribiendo(usuarios) {
+            const indicador = document.getElementById('indicadorEscribiendo');
+            
+            if (!indicador) {
+                // Crear el indicador si no existe
+                const caja = document.getElementById('cajaMensajes');
+                const div = document.createElement('div');
+                div.id = 'indicadorEscribiendo';
+                div.className = 'text-muted small ps-3';
+                div.style.minHeight = '20px';
+                caja.parentElement.insertBefore(div, caja.nextSibling);
+            }
+            
+            const ind = document.getElementById('indicadorEscribiendo');
+            
+            if (usuarios.length === 0) {
+                ind.textContent = '';
+            } else if (usuarios.length === 1) {
+                ind.innerHTML = `<i class="fas fa-pencil-alt"></i> ${usuarios[0]} está escribiendo...`;
+            } else {
+                ind.innerHTML = `<i class="fas fa-pencil-alt"></i> ${usuarios.length} personas están escribiendo...`;
             }
         }
 
-        // Función para mostrar alertas de moderación
+        // ========== FUNCIONES AUXILIARES ==========
+
         function mostrarAlertaModeracion(tipo, mensaje) {
             const caja = document.getElementById('cajaMensajes');
             
@@ -1051,13 +1178,9 @@
             caja.appendChild(alerta);
             scrollAlFondo();
             
-            // Auto-cerrar después de 10 segundos
-            setTimeout(() => {
-                alerta.remove();
-            }, 10000);
+            setTimeout(() => alerta.remove(), 10000);
         }
 
-        // Función auxiliar para alertas temporales
         function mostrarAlertaTemporal(mensaje, tipo = 'info') {
             const caja = document.getElementById('cajaMensajes');
             
@@ -1071,18 +1194,39 @@
             caja.appendChild(alerta);
             scrollAlFondo();
             
-            setTimeout(() => {
-                alerta.remove();
-            }, 5000);
+            setTimeout(() => alerta.remove(), 5000);
         }
 
-        // Función para mostrar/ocultar el menú de emojis
+        function mostrarNotificacionUsuario(mensaje, tipo) {
+            const statusChat = document.getElementById('statusChat');
+            const textoOriginal = statusChat.textContent;
+            
+            statusChat.textContent = mensaje;
+            statusChat.className = `badge bg-${tipo}`;
+            
+            setTimeout(() => {
+                statusChat.textContent = 'Conectado';
+                statusChat.className = 'badge bg-success';
+            }, 3000);
+        }
+
+        function actualizarContadorUsuarios(total) {
+            const statusChat = document.getElementById('statusChat');
+            
+            if (total > 1) {
+                statusChat.textContent = `${total} conectados`;
+            } else {
+                statusChat.textContent = 'Conectado';
+            }
+        }
+
+        // ========== FUNCIONES DE EMOJIS (mantener las originales) ==========
+
         function toggleEmojiMenu() {
             const menu = document.getElementById('emojiMenu');
             menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
         }
 
-        // Función para agregar un emoji al input
         function addEmoji(emoji) {
             const input = document.getElementById('inputMensaje');
             input.value += emoji;
@@ -1090,7 +1234,6 @@
             document.getElementById('emojiMenu').style.display = 'none';
         }
 
-        // Cerrar menú de emojis al hacer clic fuera
         document.addEventListener('click', function(event) {
             const menu = document.getElementById('emojiMenu');
             const button = document.querySelector('button[onclick="toggleEmojiMenu()"]');
@@ -1098,10 +1241,6 @@
                 menu.style.display = 'none';
             }
         });
-
-        // Iniciar el ciclo de actualización (Cada 3 segundos)
-        setInterval(actualizarChat, 3000);
-        actualizarChat(); // Primera carga
     </script>
 
     <!-- Scripts para mensajes flotantes -->

@@ -24,10 +24,12 @@ def create_app():
     # Inicializar caché
     cache.init_app(app)
     
-    # ✅ INICIALIZAR SOCKETIO
+    # ✅ INICIALIZAR SOCKETIO CON AUTO-DETECCIÓN
+    # async_mode=None detecta automáticamente: gevent, eventlet, threading o asyncio
+    # Esto hace tu app compatible con cualquier worker de gunicorn
     socketio.init_app(app, 
                       cors_allowed_origins="*",
-                      async_mode='eventlet',
+                      async_mode=None,  # 🔄 AUTO-DETECTA el mejor modo disponible
                       logger=True,
                       engineio_logger=True)
 

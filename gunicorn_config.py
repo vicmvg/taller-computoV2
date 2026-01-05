@@ -1,33 +1,36 @@
 # gunicorn_config.py
 """
 Configuración de Gunicorn para Flask en Render
-Optimizado para WebSockets con eventlet
+Optimizado para 2 CPU, 8GB RAM (Plan Starter)
 """
 
 import os
+import multiprocessing
 
 # Binding
 bind = "0.0.0.0:" + str(os.environ.get("PORT", 8000))
 
-# ⚠️ IMPORTANTE: WebSockets requiere 1 solo worker
-# Con eventlet, este worker puede manejar miles de conexiones concurrentes
-workers = 1
+# Workers
+# Fórmula: (2 x $num_cores) + 1
+# Con 2 CPU: (2 x 2) + 1 = 5 workers
+# Pero en Render Starter, usamos 3 para dejar margen
+workers = 3
 
-# ❌ Threads NO se usan con eventlet (eventlet maneja concurrencia internamente)
-# threads = 4  # COMENTADO - no aplica con eventlet
+# Threads por worker
+# Con 3 workers x 4 threads = 12 requests concurrentes
+threads = 4
 
-# ✅ Worker class para WebSockets
-worker_class = "eventlet"  # CRÍTICO para WebSockets
+# Worker class
+worker_class = "sync"  # O "gthread" para threads reales
 
 # Timeouts
-timeout = 120  # Aumentado a 120s para conexiones WebSocket persistentes
+timeout = 60  # 60 segundos para requests lentos
 graceful_timeout = 30
 keepalive = 5
 
-# Recycling - DESHABILITADO para WebSockets
-# Con WebSockets persistentes, reciclar workers corta las conexiones
-max_requests = 0  # 0 = nunca reciclar
-max_requests_jitter = 0
+# Recycling
+max_requests = 1000  # Reciclar worker después de 1000 requests
+max_requests_jitter = 100  # Añadir variación aleatoria
 
 # Logging
 accesslog = "-"  # Logs a stdout
@@ -35,7 +38,7 @@ errorlog = "-"   # Errors a stdout
 loglevel = "info"
 
 # Process naming
-proc_name = "flask_taller_computo_ws"
+proc_name = "flask_taller_computo"
 
 # Server mechanics
 daemon = False
@@ -46,24 +49,20 @@ group = None
 tmp_upload_dir = None
 
 # Preload
-preload_app = False  # False para eventlet (evita problemas)
+preload_app = True  # Cargar app antes de fork (ahorra RAM)
 
 # Security
 limit_request_line = 4094
 limit_request_fields = 100
 limit_request_field_size = 8190
 
-# ✅ CONFIGURACIÓN ESPECÍFICA DE EVENTLET
-worker_connections = 1000  # Cada worker puede manejar 1000 conexiones simultáneas
-
 def when_ready(server):
     """Se ejecuta cuando el servidor está listo"""
     print("=" * 60)
-    print("🚀 Gunicorn con WebSockets está listo")
-    print(f"   Worker class: {worker_class}")
+    print("🚀 Gunicorn está listo para recibir conexiones")
     print(f"   Workers: {workers}")
-    print(f"   Conexiones por worker: {worker_connections}")
-    print(f"   Capacidad total: ~{worker_connections} conexiones WebSocket")
+    print(f"   Threads por worker: {threads}")
+    print(f"   Capacidad: {workers * threads} requests concurrentes")
     print(f"   Timeout: {timeout}s")
     print("=" * 60)
 
@@ -77,11 +76,15 @@ def pre_fork(server, worker):
 
 def post_fork(server, worker):
     """Se ejecuta después de hacer fork del worker"""
-    print(f"✅ Worker eventlet spawneado (PID: {worker.pid})")
+    print(f"✅ Worker spawneado (PID: {worker.pid})")
 
 def pre_exec(server):
     """Se ejecuta antes de ejecutar el nuevo maestro"""
     print("🔄 Ejecutando nuevo maestro...")
+
+def when_ready(server):
+    """Se ejecuta cuando el servidor está listo"""
+    pass
 
 def worker_exit(server, worker):
     """Se ejecuta cuando un worker termina"""

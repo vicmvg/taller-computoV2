@@ -1,7 +1,7 @@
 # web/__init__.py
 from flask import Flask, redirect, url_for, render_template, send_file, send_from_directory, flash
 from .config import Config
-from .extensions import db, cache, socketio  # ✅ IMPORTAR SOCKETIO
+from .extensions import db, cache
 from .routes.auth import auth_bp
 from .routes.admin import admin_bp
 from .routes.alumno import alumno_bp
@@ -23,23 +23,11 @@ def create_app():
     
     # Inicializar caché
     cache.init_app(app)
-    
-    # ✅ INICIALIZAR SOCKETIO CON AUTO-DETECCIÓN
-    # async_mode=None detecta automáticamente: gevent, eventlet, threading o asyncio
-    # Esto hace tu app compatible con cualquier worker de gunicorn
-    socketio.init_app(app, 
-                      cors_allowed_origins="*",
-                      async_mode=None,  # 🔄 AUTO-DETECTA el mejor modo disponible
-                      logger=True,
-                      engineio_logger=True)
 
     # 4. Registramos los Blueprints
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(alumno_bp, url_prefix='/alumnos')
-
-    # ✅ IMPORTAR EVENTOS DE SOCKETIO (DESPUÉS de init_app)
-    from .events import chat_events
 
     # 5. RUTA PRINCIPAL - INDEX con datos
     @app.route('/')

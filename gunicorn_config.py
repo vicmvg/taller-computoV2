@@ -1,24 +1,23 @@
 # gunicorn_config.py
 """
 Configuración de Gunicorn para Flask en Render
-Optimizado para WebSockets con gevent (compatible Python 3.13)
+Optimizado para WebSockets con eventlet
 """
 
 import os
-import multiprocessing
 
 # Binding
 bind = "0.0.0.0:" + str(os.environ.get("PORT", 8000))
 
 # ⚠️ IMPORTANTE: WebSockets requiere 1 solo worker
-# Con gevent, este worker puede manejar miles de conexiones concurrentes
+# Con eventlet, este worker puede manejar miles de conexiones concurrentes
 workers = 1
 
-# ❌ Threads NO se usan con gevent (gevent maneja concurrencia internamente)
-# threads = 4  # COMENTADO - no aplica con gevent
+# ❌ Threads NO se usan con eventlet (eventlet maneja concurrencia internamente)
+# threads = 4  # COMENTADO - no aplica con eventlet
 
-# ✅ Worker class para WebSockets compatible con Python 3.13
-worker_class = "gevent"  # CAMBIO: gevent en lugar de eventlet
+# ✅ Worker class para WebSockets
+worker_class = "eventlet"  # CRÍTICO para WebSockets
 
 # Timeouts
 timeout = 120  # Aumentado a 120s para conexiones WebSocket persistentes
@@ -47,14 +46,14 @@ group = None
 tmp_upload_dir = None
 
 # Preload
-preload_app = False  # False para gevent (evita problemas con greenlets)
+preload_app = False  # False para eventlet (evita problemas)
 
 # Security
 limit_request_line = 4094
 limit_request_fields = 100
 limit_request_field_size = 8190
 
-# ✅ CONFIGURACIÓN ESPECÍFICA DE GEVENT
+# ✅ CONFIGURACIÓN ESPECÍFICA DE EVENTLET
 worker_connections = 1000  # Cada worker puede manejar 1000 conexiones simultáneas
 
 def when_ready(server):
@@ -78,7 +77,7 @@ def pre_fork(server, worker):
 
 def post_fork(server, worker):
     """Se ejecuta después de hacer fork del worker"""
-    print(f"✅ Worker gevent spawneado (PID: {worker.pid})")
+    print(f"✅ Worker eventlet spawneado (PID: {worker.pid})")
 
 def pre_exec(server):
     """Se ejecuta antes de ejecutar el nuevo maestro"""

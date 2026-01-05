@@ -13,5 +13,4 @@ python-magic==0.4.27
 flask-caching
 flask-socketio==5.3.6
 python-socketio==5.11.0
-gevent>=24.2.1
-gevent-websocket==0.10.1
+eventlet==0.33.3

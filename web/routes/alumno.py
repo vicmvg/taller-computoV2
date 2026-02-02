@@ -701,28 +701,21 @@ def eliminar_apunte(apunte_id):
 @alumno_bp.route('/espacios-colaborativos')
 @require_alumno
 def mis_espacios_colaborativos():
-    """Ver espacios colaborativos del alumno"""
+    """Ver todos los espacios colaborativos del alumno"""
     alumno_id = session.get('alumno_id')
     alumno = UsuarioAlumno.query.get(alumno_id)
     
-    # Obtener espacios donde el alumno es miembro
-    mis_espacios = EspacioColaborativo.query.join(
-        MiembroEspacio, EspacioColaborativo.id == MiembroEspacio.espacio_id
+    # ✅ CORRECCIÓN: El filtro activo está en EspacioColaborativo
+    mis_espacios = db.session.query(EspacioColaborativo).join(
+        MiembroEspacio
     ).filter(
         MiembroEspacio.alumno_id == alumno_id,
-        MiembroEspacio.activo == True
+        EspacioColaborativo.activo == True  # ← CORREGIDO
     ).order_by(EspacioColaborativo.fecha_creacion.desc()).all()
-    
-    # Obtener invitaciones pendientes
-    invitaciones_pendientes = MiembroEspacio.query.filter_by(
-        alumno_id=alumno_id,
-        activo=False  # Activo=False significa invitación pendiente
-    ).join(EspacioColaborativo).order_by(MiembroEspacio.fecha_invitacion.desc()).all()
     
     return render_template('alumnos/espacios_colaborativos.html',
                          alumno=alumno,
-                         espacios=mis_espacios,
-                         invitaciones=invitaciones_pendientes)
+                         mis_espacios=mis_espacios)
 
 
 @alumno_bp.route('/espacios-colaborativos/<int:espacio_id>')

@@ -490,3 +490,132 @@ class ApunteClase(db.Model):
     
     def __repr__(self):
         return f'<ApunteClase {self.tema} - {self.fecha_clase}>'
+
+
+# ============================================
+# NUEVOS MODELOS PARA ESPACIOS COLABORATIVOS
+# Agregar estos modelos al final de web/models.py
+# ============================================
+
+class EspacioColaborativo(db.Model):
+    """Espacios de trabajo colaborativo entre alumnos"""
+    __tablename__ = 'espacios_colaborativos'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Información básica del proyecto
+    titulo = db.Column(db.String(200), nullable=False)
+    descripcion = db.Column(db.Text, nullable=True)
+    fecha_entrega = db.Column(db.Date, nullable=True)
+    
+    # Estado del espacio
+    activo = db.Column(db.Boolean, default=True)
+    
+    # Información del maestro
+    creado_por = db.Column(db.String(100), nullable=False)
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_desactivacion = db.Column(db.DateTime, nullable=True)
+    
+    # Relaciones
+    miembros = db.relationship('MiembroEspacio', back_populates='espacio', cascade='all, delete-orphan')
+    roles = db.relationship('RolAsignado', back_populates='espacio', cascade='all, delete-orphan')
+    archivos = db.relationship('ArchivoColaborativo', back_populates='espacio', cascade='all, delete-orphan')
+    ideas = db.relationship('IdeaColaborativa', back_populates='espacio', cascade='all, delete-orphan')
+    
+    def __repr__(self):
+        return f'<EspacioColaborativo {self.titulo}>'
+
+
+class MiembroEspacio(db.Model):
+    """Alumnos que pertenecen a un espacio colaborativo"""
+    __tablename__ = 'miembros_espacio'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    espacio_id = db.Column(db.Integer, db.ForeignKey('espacios_colaborativos.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Fecha de incorporación
+    fecha_incorporacion = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relaciones
+    espacio = db.relationship('EspacioColaborativo', back_populates='miembros')
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('espacios_participando', cascade='all, delete-orphan'))
+    
+    def __repr__(self):
+        return f'<MiembroEspacio Espacio:{self.espacio_id} Alumno:{self.alumno_id}>'
+
+
+class RolAsignado(db.Model):
+    """Roles que cada alumno tiene en el proyecto colaborativo"""
+    __tablename__ = 'roles_asignados'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    espacio_id = db.Column(db.Integer, db.ForeignKey('espacios_colaborativos.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Información del rol
+    nombre_rol = db.Column(db.String(100), nullable=False)  # Ej: "Investigador", "Diseñador", "Programador"
+    descripcion = db.Column(db.Text, nullable=True)
+    
+    # Estado del rol
+    completado = db.Column(db.Boolean, default=False)
+    fecha_asignacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_completado = db.Column(db.DateTime, nullable=True)
+    
+    # Relaciones
+    espacio = db.relationship('EspacioColaborativo', back_populates='roles')
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('roles_asignados', cascade='all, delete-orphan'))
+    
+    def __repr__(self):
+        return f'<RolAsignado {self.nombre_rol} - Alumno:{self.alumno_id}>'
+
+
+class ArchivoColaborativo(db.Model):
+    """Archivos compartidos en el espacio colaborativo"""
+    __tablename__ = 'archivos_colaborativos'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    espacio_id = db.Column(db.Integer, db.ForeignKey('espacios_colaborativos.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Información del archivo
+    nombre_archivo = db.Column(db.String(200), nullable=False)
+    archivo_url = db.Column(db.String(500), nullable=False)
+    descripcion = db.Column(db.Text, nullable=True)
+    tipo_archivo = db.Column(db.String(50), nullable=True)  # Ej: "documento", "imagen", "video"
+    
+    # Metadatos
+    fecha_subida = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relaciones
+    espacio = db.relationship('EspacioColaborativo', back_populates='archivos')
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('archivos_colaborativos', cascade='all, delete-orphan'))
+    
+    def __repr__(self):
+        return f'<ArchivoColaborativo {self.nombre_archivo}>'
+
+
+class IdeaColaborativa(db.Model):
+    """Ideas y notas compartidas en el espacio colaborativo"""
+    __tablename__ = 'ideas_colaborativas'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    espacio_id = db.Column(db.Integer, db.ForeignKey('espacios_colaborativos.id', ondelete='CASCADE'), nullable=False)
+    alumno_id = db.Column(db.Integer, db.ForeignKey('usuario_alumno.id', ondelete='CASCADE'), nullable=False)
+    
+    # Contenido de la idea
+    titulo = db.Column(db.String(200), nullable=False)
+    contenido = db.Column(db.Text, nullable=False)
+    categoria = db.Column(db.String(50), nullable=True)  # Ej: "idea", "pregunta", "avance"
+    
+    # Estado
+    destacada = db.Column(db.Boolean, default=False)
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_modificacion = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relaciones
+    espacio = db.relationship('EspacioColaborativo', back_populates='ideas')
+    alumno = db.relationship('UsuarioAlumno', backref=db.backref('ideas_colaborativas', cascade='all, delete-orphan'))
+    
+    def __repr__(self):
+        return f'<IdeaColaborativa {self.titulo}>'

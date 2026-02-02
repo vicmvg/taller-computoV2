@@ -1,0 +1,94 @@
+{% extends "alumnos/base.html" %}
+
+{% block title %}Mis Espacios Colaborativos{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2><i class="fas fa-users-cog me-2"></i>Mis Espacios Colaborativos</h2>
+            <p class="text-muted">Trabaja en equipo con tus compañeros</p>
+        </div>
+    </div>
+
+    {% if mis_espacios %}
+        <div class="row">
+            {% for espacio in mis_espacios %}
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card h-100 shadow-sm hover-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-folder-open text-primary me-2"></i>
+                                {{ espacio.titulo }}
+                            </h5>
+                            <span class="badge bg-success">Activo</span>
+                        </div>
+
+                        {% if espacio.descripcion %}
+                        <p class="card-text text-muted small mb-3">
+                            {{ espacio.descripcion[:100] }}{% if espacio.descripcion|length > 100 %}...{% endif %}
+                        </p>
+                        {% endif %}
+
+                        <div class="mb-3">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-users text-primary me-2"></i>
+                                <small>{{ espacio.miembros|length }} miembros en el equipo</small>
+                            </div>
+                            
+                            {% if espacio.fecha_entrega %}
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-calendar text-warning me-2"></i>
+                                <small>Fecha de entrega: {{ espacio.fecha_entrega.strftime('%d/%m/%Y') }}</small>
+                            </div>
+                            {% endif %}
+
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-file text-success me-2"></i>
+                                <small>{{ espacio.archivos|length }} archivos compartidos</small>
+                            </div>
+
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-lightbulb text-info me-2"></i>
+                                <small>{{ espacio.ideas|length }} ideas registradas</small>
+                            </div>
+                        </div>
+
+                        <a href="{{ url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio.id) }}" 
+                           class="btn btn-primary w-100">
+                            <i class="fas fa-arrow-right me-2"></i>Entrar al Espacio
+                        </a>
+                    </div>
+                    <div class="card-footer bg-light text-muted small">
+                        <i class="fas fa-clock me-1"></i>
+                        Creado el {{ espacio.fecha_creacion.strftime('%d/%m/%Y') }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-users fa-4x text-muted mb-3"></i>
+                <h4 class="text-muted">No estás en ningún espacio colaborativo</h4>
+                <p class="text-muted">
+                    Tu maestro te agregará cuando haya un proyecto en equipo.
+                </p>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.hover-card {
+    transition: all 0.3s ease;
+    border: none;
+}
+.hover-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+}
+</style>
+{% endblock %}

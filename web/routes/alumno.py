@@ -1,6 +1,11 @@
 # web/routes/alumno.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, send_file, send_from_directory
-from web.models import UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, Asistencia, Pago, ReciboPago, SolicitudArchivo, ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, Configuracion, Encuesta, RespuestaEncuesta, ApunteClase
+from web.models import (UsuarioAlumno, EntregaAlumno, Cuestionario, Anuncio, 
+                        Asistencia, Pago, ReciboPago, SolicitudArchivo, 
+                        ArchivoEnviado, Mensaje, MensajeFlotante, MensajeLeido, 
+                        Configuracion, Encuesta, RespuestaEncuesta, ApunteClase,
+                        EspacioColaborativo, MiembroEspacio, RolAsignado,
+                        ArchivoColaborativo, IdeaColaborativa)  # ← AGREGAR ESTO
 from web.extensions import db
 from web.utils import require_alumno, s3_manager, file_validator, guardar_archivo, chat_limiter, log_error, chat_moderator
 from datetime import datetime
@@ -688,6 +693,379 @@ def eliminar_apunte(apunte_id):
         flash(f'Error al eliminar: {str(e)}', 'danger')
     
     return redirect(url_for('alumno.mis_apuntes'))
+
+# ============================================
+# RUTAS PARA ESPACIOS COLABORATIVOS (ALUMNOS)
+# ============================================
+
+@alumno_bp.route('/espacios-colaborativos')
+@require_alumno
+def mis_espacios_colaborativos():
+    """Ver espacios colaborativos del alumno"""
+    alumno_id = session.get('alumno_id')
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    
+    # Obtener espacios donde el alumno es miembro
+    mis_espacios = EspacioColaborativo.query.join(
+        MiembroEspacio, EspacioColaborativo.id == MiembroEspacio.espacio_id
+    ).filter(
+        MiembroEspacio.alumno_id == alumno_id,
+        MiembroEspacio.activo == True
+    ).order_by(EspacioColaborativo.fecha_creacion.desc()).all()
+    
+    # Obtener invitaciones pendientes
+    invitaciones_pendientes = MiembroEspacio.query.filter_by(
+        alumno_id=alumno_id,
+        activo=False  # Activo=False significa invitación pendiente
+    ).join(EspacioColaborativo).order_by(MiembroEspacio.fecha_invitacion.desc()).all()
+    
+    return render_template('alumnos/espacios_colaborativos.html',
+                         alumno=alumno,
+                         espacios=mis_espacios,
+                         invitaciones=invitaciones_pendientes)
+
+
+@alumno_bp.route('/espacios-colaborativos/<int:espacio_id>')
+@require_alumno
+def ver_espacio_colaborativo(espacio_id):
+    """Ver un espacio colaborativo específico"""
+    alumno_id = session.get('alumno_id')
+    alumno = UsuarioAlumno.query.get(alumno_id)
+    
+    # Verificar que el alumno es miembro activo del espacio
+    miembro = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        alumno_id=alumno_id,
+        activo=True
+    ).first()
+    
+    if not miembro:
+        flash('⚠️ No tienes acceso a este espacio colaborativo', 'danger')
+        return redirect(url_for('alumno.mis_espacios_colaborativos'))
+    
+    # Obtener el espacio
+    espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+    
+    # Obtener miembros activos
+    miembros = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        activo=True
+    ).join(UsuarioAlumno).order_by(UsuarioAlumno.nombre_completo).all()
+    
+    # Obtener archivos del espacio
+    archivos = ArchivoColaborativo.query.filter_by(
+        espacio_id=espacio_id
+    ).order_by(ArchivoColaborativo.fecha_subida.desc()).all()
+    
+    # Obtener ideas del espacio
+    ideas = IdeaColaborativa.query.filter_by(
+        espacio_id=espacio_id
+    ).order_by(IdeaColaborativa.fecha_creacion.desc()).all()
+    
+    return render_template('alumnos/ver_espacio_colaborativo.html',
+                         alumno=alumno,
+                         espacio=espacio,
+                         miembros=miembros,
+                         archivos=archivos,
+                         ideas=ideas,
+                         miembro=miembro)
+
+
+@alumno_bp.route('/espacios-colaborativos/<int:espacio_id>/subir-archivo', methods=['POST'])
+@require_alumno
+def subir_archivo_colaborativo(espacio_id):
+    """Subir archivo a espacio colaborativo"""
+    alumno_id = session.get('alumno_id')
+    
+    # Verificar que el alumno es miembro activo del espacio
+    miembro = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        alumno_id=alumno_id,
+        activo=True
+    ).first()
+    
+    if not miembro:
+        flash('⚠️ No tienes permiso para subir archivos a este espacio', 'danger')
+        return redirect(url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio_id))
+    
+    if 'archivo' not in request.files:
+        flash('No se subió ningún archivo', 'danger')
+        return redirect(url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio_id))
+    
+    archivo = request.files['archivo']
+    descripcion = request.form.get('descripcion', '').strip()
+    
+    if archivo.filename == '':
+        flash('Ningún archivo seleccionado', 'danger')
+        return redirect(url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio_id))
+    
+    try:
+        # Guardar archivo
+        ruta_archivo, es_s3 = guardar_archivo(archivo)
+        
+        # Crear registro en base de datos
+        nuevo_archivo = ArchivoColaborativo(
+            espacio_id=espacio_id,
+            alumno_id=alumno_id,
+            nombre_original=archivo.filename,
+            nombre_archivo=os.path.basename(ruta_archivo),
+            archivo_url=ruta_archivo,
+            descripcion=descripcion if descripcion else None,
+            tipo_contenido=archivo.content_type
+        )
+        
+        db.session.add(nuevo_archivo)
+        db.session.commit()
+        
+        flash('✅ Archivo subido correctamente al espacio colaborativo', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al subir archivo: {str(e)}', 'danger')
+    
+    return redirect(url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio_id))
+
+
+@alumno_bp.route('/espacios-colaborativos/<int:espacio_id>/nueva-idea', methods=['POST'])
+@require_alumno
+def nueva_idea_colaborativa(espacio_id):
+    """Agregar nueva idea al espacio colaborativo"""
+    alumno_id = session.get('alumno_id')
+    
+    # Verificar que el alumno es miembro activo del espacio
+    miembro = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        alumno_id=alumno_id,
+        activo=True
+    ).first()
+    
+    if not miembro:
+        return jsonify({'success': False, 'error': 'No tienes permiso'}), 403
+    
+    titulo = request.form.get('titulo', '').strip()
+    contenido = request.form.get('contenido', '').strip()
+    
+    if not titulo or not contenido:
+        return jsonify({'success': False, 'error': 'Título y contenido son obligatorios'}), 400
+    
+    try:
+        # Crear nueva idea
+        nueva_idea = IdeaColaborativa(
+            espacio_id=espacio_id,
+            alumno_id=alumno_id,
+            titulo=titulo,
+            contenido=contenido
+        )
+        
+        db.session.add(nueva_idea)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '💡 Idea publicada correctamente',
+            'idea_id': nueva_idea.id
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@alumno_bp.route('/espacios-colaborativos/<int:espacio_id>/idea/<int:idea_id>/votar', methods=['POST'])
+@require_alumno
+def votar_idea_colaborativa(espacio_id, idea_id):
+    """Votar por una idea en el espacio colaborativo"""
+    alumno_id = session.get('alumno_id')
+    
+    # Verificar que el alumno es miembro activo del espacio
+    miembro = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        alumno_id=alumno_id,
+        activo=True
+    ).first()
+    
+    if not miembro:
+        return jsonify({'success': False, 'error': 'No tienes permiso'}), 403
+    
+    # Obtener la idea
+    idea = IdeaColaborativa.query.get_or_404(idea_id)
+    
+    if idea.espacio_id != espacio_id:
+        return jsonify({'success': False, 'error': 'Idea no pertenece a este espacio'}), 400
+    
+    try:
+        # Incrementar votos
+        idea.votos += 1
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '✅ Voto registrado',
+            'nuevos_votos': idea.votos
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@alumno_bp.route('/espacios-colaborativos/invitacion/<int:invitacion_id>/aceptar', methods=['POST'])
+@require_alumno
+def aceptar_invitacion_espacio(invitacion_id):
+    """Aceptar invitación a espacio colaborativo"""
+    alumno_id = session.get('alumno_id')
+    
+    # Obtener invitación
+    invitacion = MiembroEspacio.query.get_or_404(invitacion_id)
+    
+    # Verificar que la invitación es para este alumno
+    if invitacion.alumno_id != alumno_id:
+        flash('⚠️ Esta invitación no es para ti', 'danger')
+        return redirect(url_for('alumno.mis_espacios_colaborativos'))
+    
+    # Verificar que la invitación esté pendiente
+    if invitacion.activo:
+        flash('⚠️ Esta invitación ya fue aceptada', 'warning')
+        return redirect(url_for('alumno.mis_espacios_colaborativos'))
+    
+    try:
+        # Activar membresía
+        invitacion.activo = True
+        invitacion.fecha_aceptacion = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Obtener nombre del espacio para el mensaje
+        espacio = EspacioColaborativo.query.get(invitacion.espacio_id)
+        
+        flash(f'🎉 ¡Te has unido al espacio "{espacio.nombre}"!', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al aceptar invitación: {str(e)}', 'danger')
+    
+    return redirect(url_for('alumno.mis_espacios_colaborativos'))
+
+
+@alumno_bp.route('/espacios-colaborativos/invitacion/<int:invitacion_id>/rechazar', methods=['POST'])
+@require_alumno
+def rechazar_invitacion_espacio(invitacion_id):
+    """Rechazar invitación a espacio colaborativo"""
+    alumno_id = session.get('alumno_id')
+    
+    # Obtener invitación
+    invitacion = MiembroEspacio.query.get_or_404(invitacion_id)
+    
+    # Verificar que la invitación es para este alumno
+    if invitacion.alumno_id != alumno_id:
+        flash('⚠️ Esta invitación no es para ti', 'danger')
+        return redirect(url_for('alumno.mis_espacios_colaborativos'))
+    
+    try:
+        # Eliminar invitación (o marcar como rechazada)
+        db.session.delete(invitacion)
+        db.session.commit()
+        
+        flash('Invitación rechazada', 'info')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al rechazar invitación: {str(e)}', 'danger')
+    
+    return redirect(url_for('alumno.mis_espacios_colaborativos'))
+
+
+@alumno_bp.route('/espacios-colaborativos/<int:espacio_id>/abandonar', methods=['POST'])
+@require_alumno
+def abandonar_espacio_colaborativo(espacio_id):
+    """Abandonar un espacio colaborativo"""
+    alumno_id = session.get('alumno_id')
+    
+    # Obtener membresía
+    miembro = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        alumno_id=alumno_id,
+        activo=True
+    ).first()
+    
+    if not miembro:
+        flash('⚠️ No eres miembro de este espacio', 'danger')
+        return redirect(url_for('alumno.mis_espacios_colaborativos'))
+    
+    # Verificar que no es el creador (el creador no puede abandonar, solo eliminar)
+    espacio = EspacioColaborativo.query.get(espacio_id)
+    if espacio.creado_por_alumno_id == alumno_id:
+        flash('⚠️ Como creador del espacio, no puedes abandonarlo. Puedes eliminarlo si lo deseas.', 'warning')
+        return redirect(url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio_id))
+    
+    try:
+        # Eliminar membresía
+        db.session.delete(miembro)
+        db.session.commit()
+        
+        flash('👋 Has abandonado el espacio colaborativo', 'info')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al abandonar espacio: {str(e)}', 'danger')
+    
+    return redirect(url_for('alumno.mis_espacios_colaborativos'))
+
+
+@alumno_bp.route('/api/espacios-colaborativos/<int:espacio_id>/ideas')
+@require_alumno
+def obtener_ideas_espacio(espacio_id):
+    """API para obtener ideas de un espacio (para actualización AJAX)"""
+    alumno_id = session.get('alumno_id')
+    
+    # Verificar que el alumno es miembro activo del espacio
+    miembro = MiembroEspacio.query.filter_by(
+        espacio_id=espacio_id,
+        alumno_id=alumno_id,
+        activo=True
+    ).first()
+    
+    if not miembro:
+        return jsonify({'error': 'No tienes acceso'}), 403
+    
+    # Obtener ideas ordenadas por votos y fecha
+    ideas = IdeaColaborativa.query.filter_by(
+        espacio_id=espacio_id
+    ).order_by(
+        IdeaColaborativa.votos.desc(),
+        IdeaColaborativa.fecha_creacion.desc()
+    ).all()
+    
+    ideas_json = []
+    for idea in ideas:
+        ideas_json.append({
+            'id': idea.id,
+            'titulo': idea.titulo,
+            'contenido': idea.contenido,
+            'votos': idea.votos,
+            'autor': idea.alumno.nombre_completo,
+            'fecha': idea.fecha_creacion.strftime('%d/%m/%Y %H:%M'),
+            'puedo_votar': idea.alumno_id != alumno_id  # No puede votar por su propia idea
+        })
+    
+    return jsonify({'ideas': ideas_json})
+
+
+@alumno_bp.route('/api/espacios-colaborativos/notificaciones')
+@require_alumno
+def notificaciones_espacios_colaborativos():
+    """API para obtener notificaciones de espacios colaborativos"""
+    alumno_id = session.get('alumno_id')
+    
+    # Contar invitaciones pendientes
+    invitaciones_pendientes = MiembroEspacio.query.filter_by(
+        alumno_id=alumno_id,
+        activo=False
+    ).count()
+    
+    return jsonify({
+        'invitaciones_pendientes': invitaciones_pendientes
+    })
 
 @alumno_bp.route('/logout')
 def logout():

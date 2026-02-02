@@ -1,0 +1,297 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ espacio.titulo }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.espacios_colaborativos') }}">Espacios Colaborativos</a></li>
+            <li class="breadcrumb-item active">{{ espacio.titulo }}</li>
+        </ol>
+    </nav>
+
+    <!-- Header del espacio -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h3><i class="fas fa-folder-open me-2"></i>{{ espacio.titulo }}</h3>
+                    {% if espacio.descripcion %}
+                    <p class="text-muted">{{ espacio.descripcion }}</p>
+                    {% endif %}
+                </div>
+                <div>
+                    <span class="badge bg-{{ 'success' if espacio.activo else 'secondary' }} fs-6">
+                        {{ 'Activo' if espacio.activo else 'Inactivo' }}
+                    </span>
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-3">
+                    <small class="text-muted d-block">Creado por</small>
+                    <strong>{{ espacio.creado_por }}</strong>
+                </div>
+                <div class="col-md-3">
+                    <small class="text-muted d-block">Fecha de creación</small>
+                    <strong>{{ espacio.fecha_creacion.strftime('%d/%m/%Y') }}</strong>
+                </div>
+                {% if espacio.fecha_entrega %}
+                <div class="col-md-3">
+                    <small class="text-muted d-block">Fecha de entrega</small>
+                    <strong class="text-warning">{{ espacio.fecha_entrega.strftime('%d/%m/%Y') }}</strong>
+                </div>
+                {% endif %}
+                <div class="col-md-3">
+                    <small class="text-muted d-block">Miembros</small>
+                    <strong>{{ espacio.miembros|length }}</strong>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditarEspacio">
+                    <i class="fas fa-edit me-1"></i>Editar Información
+                </button>
+                <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalAgregarMiembro">
+                    <i class="fas fa-user-plus me-1"></i>Agregar Miembro
+                </button>
+                {% if espacio.activo %}
+                <button class="btn btn-warning btn-sm" onclick="desactivarEspacio()">
+                    <i class="fas fa-power-off me-1"></i>Desactivar Espacio
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Miembros del equipo -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-users me-2"></i>Miembros del Equipo</h5>
+                </div>
+                <div class="card-body">
+                    {% if espacio.miembros %}
+                        {% for miembro in espacio.miembros %}
+                        {% set alumno = miembro.alumno %}
+                        <div class="d-flex justify-content-between align-items-center mb-3 p-2 border-bottom">
+                            <div class="d-flex align-items-center">
+                                {% if alumno.foto_perfil %}
+                                <img src="{{ alumno.foto_perfil }}" class="rounded-circle me-3" 
+                                     width="40" height="40" alt="{{ alumno.nombre_completo }}">
+                                {% else %}
+                                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                                     style="width: 40px; height: 40px;">
+                                    <i class="fas fa-user"></i>
+                                </div>
+                                {% endif %}
+                                <div>
+                                    <strong>{{ alumno.nombre_completo }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ alumno.grado_grupo }}</small>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-danger" 
+                                    onclick="eliminarMiembro({{ miembro.id }}, '{{ alumno.nombre_completo }}')">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">No hay miembros en este espacio.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Roles asignados -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="fas fa-tasks me-2"></i>Roles Asignados</h5>
+                </div>
+                <div class="card-body">
+                    {% if espacio.roles %}
+                        {% for rol in espacio.roles %}
+                        {% set alumno = rol.alumno %}
+                        <div class="mb-3 p-2 border rounded">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong>{{ alumno.nombre_completo }}</strong>
+                                    <br>
+                                    <span class="badge bg-primary">{{ rol.nombre_rol }}</span>
+                                    {% if rol.completado %}
+                                    <span class="badge bg-success"><i class="fas fa-check"></i> Completado</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% if rol.descripcion %}
+                            <p class="mb-0 mt-2 small text-muted">{{ rol.descripcion }}</p>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">Los alumnos aún no han asignado roles.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Archivos compartidos -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>Archivos Compartidos</h5>
+                </div>
+                <div class="card-body">
+                    {% if espacio.archivos %}
+                        <div class="list-group">
+                            {% for archivo in espacio.archivos %}
+                            {% set alumno = archivo.alumno %}
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <i class="fas fa-file me-2 text-primary"></i>
+                                        <strong>{{ archivo.nombre_archivo }}</strong>
+                                        <br>
+                                        <small class="text-muted">
+                                            Subido por {{ alumno.nombre_completo }} 
+                                            el {{ archivo.fecha_subida.strftime('%d/%m/%Y %H:%M') }}
+                                        </small>
+                                    </div>
+                                    <a href="{{ archivo.archivo_url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                        <i class="fas fa-download"></i>
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No se han compartido archivos aún.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Ideas y notas -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="fas fa-lightbulb me-2"></i>Ideas y Notas</h5>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    {% if espacio.ideas %}
+                        {% for idea in espacio.ideas %}
+                        {% set alumno = idea.alumno %}
+                        <div class="card mb-2">
+                            <div class="card-body p-2">
+                                <strong>{{ idea.titulo }}</strong>
+                                <p class="mb-1 small">{{ idea.contenido }}</p>
+                                <small class="text-muted">
+                                    {{ alumno.nombre_completo }} - 
+                                    {{ idea.fecha_creacion.strftime('%d/%m/%Y %H:%M') }}
+                                </small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">No hay ideas compartidas aún.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Editar Espacio -->
+<div class="modal fade" id="modalEditarEspacio" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.editar_espacio_colaborativo', espacio_id=espacio.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">Editar Espacio</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Título</label>
+                        <input type="text" class="form-control" name="titulo" value="{{ espacio.titulo }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descripción</label>
+                        <textarea class="form-control" name="descripcion" rows="3">{{ espacio.descripcion or '' }}</textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Fecha de Entrega</label>
+                        <input type="date" class="form-control" name="fecha_entrega" 
+                               value="{{ espacio.fecha_entrega.strftime('%Y-%m-%d') if espacio.fecha_entrega else '' }}">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Agregar Miembro -->
+<div class="modal fade" id="modalAgregarMiembro" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.agregar_miembro_espacio', espacio_id=espacio.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">Agregar Miembro</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Seleccionar Alumno</label>
+                        <select class="form-select" name="alumno_id" required>
+                            <option value="">-- Seleccionar --</option>
+                            {% for alumno in alumnos_disponibles %}
+                            <option value="{{ alumno.id }}">
+                                {{ alumno.nombre_completo }} ({{ alumno.grado_grupo }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-success">Agregar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Forms ocultos -->
+<form id="formDesactivar" method="POST" 
+      action="{{ url_for('admin.desactivar_espacio_colaborativo', espacio_id=espacio.id) }}" 
+      style="display:none;">
+</form>
+
+<form id="formEliminarMiembro" method="POST" style="display:none;">
+</form>
+
+<script>
+function desactivarEspacio() {
+    if (confirm('¿Estás seguro de desactivar este espacio?\n\nSe eliminarán todos los archivos y datos.')) {
+        document.getElementById('formDesactivar').submit();
+    }
+}
+
+function eliminarMiembro(miembroId, nombre) {
+    if (confirm(`¿Eliminar a ${nombre} del espacio colaborativo?`)) {
+        const form = document.getElementById('formEliminarMiembro');
+        form.action = `/admin/espacios-colaborativos/{{ espacio.id }}/eliminar-miembro/${miembroId}`;
+        form.submit();
+    }
+}
+</script>
+{% endblock %}

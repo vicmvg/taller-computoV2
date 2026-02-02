@@ -1,0 +1,430 @@
+{% extends "alumnos/base.html" %}
+
+{% block title %}{{ espacio.titulo }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item">
+                <a href="{{ url_for('alumno.mis_espacios_colaborativos') }}">Mis Espacios</a>
+            </li>
+            <li class="breadcrumb-item active">{{ espacio.titulo }}</li>
+        </ol>
+    </nav>
+
+    <!-- Header del proyecto -->
+    <div class="card mb-4 border-0 shadow">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h3 class="mb-2">
+                        <i class="fas fa-folder-open text-primary me-2"></i>
+                        {{ espacio.titulo }}
+                    </h3>
+                    {% if espacio.descripcion %}
+                    <p class="text-muted mb-2">{{ espacio.descripcion }}</p>
+                    {% endif %}
+                    {% if espacio.fecha_entrega %}
+                    <div class="alert alert-warning py-2 mb-0">
+                        <i class="fas fa-flag me-2"></i>
+                        <strong>Fecha de entrega:</strong> {{ espacio.fecha_entrega.strftime('%d de %B de %Y') }}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="col-md-4 text-end">
+                    <span class="badge bg-success fs-6 px-3 py-2">
+                        <i class="fas fa-check-circle me-1"></i>Espacio Activo
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Columna izquierda: Miembros y Roles -->
+        <div class="col-lg-4">
+            <!-- Miembros del equipo -->
+            <div class="card mb-4 border-0 shadow">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-users me-2"></i>Miembros del Equipo
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% for miembro in miembros %}
+                    <div class="d-flex align-items-center mb-3 p-2 rounded {% if miembro.id == alumno.id %}bg-light{% endif %}">
+                        {% if miembro.foto %}
+                        <img src="{{ miembro.foto }}" class="rounded-circle me-3" 
+                             width="50" height="50" alt="{{ miembro.nombre }}">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                             style="width: 50px; height: 50px; font-size: 1.5rem;">
+                            {{ miembro.nombre[0].upper() }}
+                        </div>
+                        {% endif %}
+                        <div class="flex-grow-1">
+                            <strong class="d-block">{{ miembro.nombre }}</strong>
+                            <small class="text-muted d-block">{{ miembro.grado }}</small>
+                            {% if miembro.rol %}
+                            <span class="badge bg-info">{{ miembro.rol }}</span>
+                            {% endif %}
+                        </div>
+                        {% if miembro.id == alumno.id %}
+                        <span class="badge bg-success">Tú</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Roles asignados -->
+            <div class="card mb-4 border-0 shadow">
+                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-tasks me-2"></i>Roles del Proyecto
+                    </h5>
+                    <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#modalAsignarRol">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    {% if miembros|selectattr('rol')|list %}
+                        {% for miembro in miembros %}
+                            {% if miembro.rol %}
+                            <div class="card mb-2">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div class="flex-grow-1">
+                                            <strong class="text-primary">{{ miembro.rol }}</strong>
+                                            <p class="mb-1 small text-muted">{{ miembro.nombre }}</p>
+                                            {% if miembro.rol_descripcion %}
+                                            <p class="mb-2 small">{{ miembro.rol_descripcion }}</p>
+                                            {% endif %}
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" 
+                                                   {% if miembro.rol_completado %}checked{% endif %}
+                                                   onchange="marcarRolCompletado({{ miembro.rol_id }}, this.checked)">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center py-3">
+                            <i class="fas fa-clipboard-list fa-3x text-muted mb-2"></i>
+                            <p class="text-muted">No hay roles asignados aún</p>
+                            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalAsignarRol">
+                                <i class="fas fa-plus me-1"></i>Asignar Roles
+                            </button>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Columna derecha: Ideas y Archivos -->
+        <div class="col-lg-8">
+            <!-- Ideas y organización -->
+            <div class="card mb-4 border-0 shadow">
+                <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-lightbulb me-2"></i>Organizar Ideas
+                    </h5>
+                    <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalAgregarIdea">
+                        <i class="fas fa-plus me-1"></i>Nueva Idea
+                    </button>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    {% if ideas %}
+                        {% for idea in ideas %}
+                        <div class="card mb-3 idea-card" data-idea-id="{{ idea.id }}">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <h6 class="mb-0 text-primary">
+                                        <i class="fas fa-{{ 'star' if idea.categoria == 'idea' else 'question' if idea.categoria == 'pregunta' else 'check' }} me-1"></i>
+                                        {{ idea.titulo }}
+                                    </h6>
+                                    {% if idea.alumno.id == alumno.id %}
+                                    <button class="btn btn-sm btn-danger" onclick="eliminarIdea({{ idea.id }})">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                                <p class="mb-2">{{ idea.contenido }}</p>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <small class="text-muted">
+                                        <i class="fas fa-user me-1"></i>{{ idea.alumno.nombre_completo }}
+                                    </small>
+                                    <small class="text-muted">
+                                        <i class="fas fa-clock me-1"></i>
+                                        {{ idea.fecha_creacion.strftime('%d/%m/%Y %H:%M') }}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-lightbulb fa-4x text-muted mb-3"></i>
+                            <p class="text-muted">No hay ideas registradas todavía</p>
+                            <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#modalAgregarIdea">
+                                <i class="fas fa-plus me-2"></i>Agregar Primera Idea
+                            </button>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Archivos compartidos -->
+            <div class="card border-0 shadow">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-file-alt me-2"></i>Archivos del Proyecto
+                    </h5>
+                    <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#modalSubirArchivo">
+                        <i class="fas fa-upload me-1"></i>Subir Archivo
+                    </button>
+                </div>
+                <div class="card-body">
+                    {% if archivos %}
+                        <div class="list-group">
+                            {% for archivo in archivos %}
+                            <div class="list-group-item" data-archivo-id="{{ archivo.id }}">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex align-items-center mb-2">
+                                            <i class="fas fa-file-{{ archivo.tipo_archivo }} fa-2x text-primary me-3"></i>
+                                            <div>
+                                                <strong class="d-block">{{ archivo.nombre_archivo }}</strong>
+                                                {% if archivo.descripcion %}
+                                                <small class="text-muted d-block">{{ archivo.descripcion }}</small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <small class="text-muted">
+                                            <i class="fas fa-user me-1"></i>{{ archivo.alumno.nombre_completo }}
+                                            <i class="fas fa-clock ms-2 me-1"></i>{{ archivo.fecha_subida.strftime('%d/%m/%Y %H:%M') }}
+                                        </small>
+                                    </div>
+                                    <div class="d-flex flex-column gap-1">
+                                        <a href="{{ archivo.archivo_url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-download"></i> Ver
+                                        </a>
+                                        {% if archivo.alumno.id == alumno.id %}
+                                        <button class="btn btn-sm btn-outline-danger" onclick="eliminarArchivo({{ archivo.id }})">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-folder-open fa-4x text-muted mb-3"></i>
+                            <p class="text-muted">No hay archivos compartidos aún</p>
+                            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalSubirArchivo">
+                                <i class="fas fa-upload me-2"></i>Subir Primer Archivo
+                            </button>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Asignar Rol -->
+<div class="modal fade" id="modalAsignarRol" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('alumno.asignar_rol_colaborativo', espacio_id=espacio.id) }}">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="fas fa-user-tag me-2"></i>Asignar Rol</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label"><strong>¿A quién?</strong></label>
+                        <select class="form-select" name="alumno_id" required>
+                            <option value="">-- Seleccionar miembro --</option>
+                            {% for miembro in miembros %}
+                            <option value="{{ miembro.id }}">{{ miembro.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Nombre del rol *</strong></label>
+                        <input type="text" class="form-control" name="nombre_rol" required
+                               placeholder="Ej: Investigador, Diseñador, Redactor...">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>¿Qué hará en este rol?</strong></label>
+                        <textarea class="form-control" name="descripcion_rol" rows="3"
+                                  placeholder="Describe las tareas de este rol..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-info">
+                        <i class="fas fa-check me-1"></i>Asignar Rol
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Agregar Idea -->
+<div class="modal fade" id="modalAgregarIdea" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('alumno.agregar_idea_colaborativa', espacio_id=espacio.id) }}">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title"><i class="fas fa-lightbulb me-2"></i>Nueva Idea</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Tipo de nota</strong></label>
+                        <select class="form-select" name="categoria">
+                            <option value="idea">💡 Idea</option>
+                            <option value="pregunta">❓ Pregunta</option>
+                            <option value="avance">✅ Avance del proyecto</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Título *</strong></label>
+                        <input type="text" class="form-control" name="titulo" required
+                               placeholder="Título breve de la idea...">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Contenido *</strong></label>
+                        <textarea class="form-control" name="contenido" rows="4" required
+                                  placeholder="Describe tu idea, pregunta o avance..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="fas fa-check me-1"></i>Agregar Idea
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Subir Archivo -->
+<div class="modal fade" id="modalSubirArchivo" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('alumno.subir_archivo_colaborativo', espacio_id=espacio.id) }}" 
+                  enctype="multipart/form-data">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="fas fa-upload me-2"></i>Subir Archivo</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Seleccionar archivo *</strong></label>
+                        <input type="file" class="form-control" name="archivo" required>
+                        <small class="text-muted">Máximo 16MB</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Descripción (opcional)</strong></label>
+                        <textarea class="form-control" name="descripcion" rows="2"
+                                  placeholder="¿Qué contiene este archivo?"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-upload me-1"></i>Subir Archivo
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.idea-card {
+    transition: all 0.3s ease;
+    border-left: 4px solid transparent;
+}
+.idea-card:hover {
+    border-left-color: #ffc107;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+</style>
+
+<script>
+function marcarRolCompletado(rolId, completado) {
+    fetch(`/alumnos/espacios-colaborativos/{{ espacio.id }}/marcar-rol-completado/${rolId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            alert('Error al actualizar el rol');
+            // Revertir el checkbox
+            event.target.checked = !completado;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error al actualizar el rol');
+        event.target.checked = !completado;
+    });
+}
+
+function eliminarIdea(ideaId) {
+    if (confirm('¿Eliminar esta idea?')) {
+        fetch(`/alumnos/espacios-colaborativos/{{ espacio.id }}/eliminar-idea/${ideaId}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.querySelector(`[data-idea-id="${ideaId}"]`).remove();
+            } else {
+                alert('Error al eliminar la idea');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al eliminar la idea');
+        });
+    }
+}
+
+function eliminarArchivo(archivoId) {
+    if (confirm('¿Eliminar este archivo?')) {
+        fetch(`/alumnos/espacios-colaborativos/{{ espacio.id }}/eliminar-archivo/${archivoId}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.querySelector(`[data-archivo-id="${archivoId}"]`).remove();
+            } else {
+                alert('Error al eliminar el archivo');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error al eliminar el archivo');
+        });
+    }
+}
+</script>
+{% endblock %}

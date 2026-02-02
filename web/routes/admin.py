@@ -5,7 +5,9 @@ from web.models import (Equipo, Mantenimiento, Anuncio, UsuarioAlumno,
                         ArchivoEnviado, ReporteAsistencia, ActividadGrado, Cuestionario,
                         BancoCuestionario, Horario, Plataforma, Mensaje, MensajeFlotante,
                         MensajeLeido, Configuracion, Recurso, CriterioBoleta, BoletaGenerada,
-                        Encuesta, RespuestaEncuesta, LibroDigital, ReporteClase)  # ✅ Agregué ReporteClase aquí
+                        Encuesta, RespuestaEncuesta, LibroDigital, ReporteClase,
+                        EspacioColaborativo, MiembroEspacio, RolAsignado, 
+                        ArchivoColaborativo, IdeaColaborativa)  # ✅ Agregué ReporteClase y nuevos modelos aquí
 from web.extensions import db
 from web.utils import require_profesor, s3_manager, guardar_archivo, generar_qr_img, log_error, log_info, generar_pdf_boleta, descargar_archivo, FileValidator
 from datetime import datetime, timedelta, date  # ✅ Agregué 'date' aquí
@@ -2405,3 +2407,273 @@ def imprimir_reporte_clase(id):
         as_attachment=True,
         download_name=nombre_archivo
     )
+
+# ============================================
+# RUTAS PARA ESPACIOS COLABORATIVOS
+# ============================================
+
+# --- GESTIÓN DE ESPACIOS COLABORATIVOS ---
+
+@admin_bp.route('/espacios-colaborativos')
+@require_profesor
+def espacios_colaborativos():
+    """Lista todos los espacios colaborativos"""
+    espacios_activos = EspacioColaborativo.query.filter_by(activo=True).order_by(EspacioColaborativo.fecha_creacion.desc()).all()
+    espacios_inactivos = EspacioColaborativo.query.filter_by(activo=False).order_by(EspacioColaborativo.fecha_desactivacion.desc()).all()
+    
+    # Obtener todos los alumnos para el selector
+    alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    
+    return render_template('admin/espacios_colaborativos.html',
+                         espacios_activos=espacios_activos,
+                         espacios_inactivos=espacios_inactivos,
+                         alumnos=alumnos)
+
+
+@admin_bp.route('/espacios-colaborativos/crear', methods=['POST'])
+@require_profesor
+def crear_espacio_colaborativo():
+    """Crear un nuevo espacio colaborativo"""
+    try:
+        titulo = request.form.get('titulo', '').strip()
+        descripcion = request.form.get('descripcion', '').strip()
+        fecha_entrega = request.form.get('fecha_entrega')
+        alumnos_ids = request.form.getlist('alumnos[]')
+        
+        if not titulo:
+            flash('❌ El título del proyecto es obligatorio', 'danger')
+            return redirect(url_for('admin.espacios_colaborativos'))
+        
+        if not alumnos_ids or len(alumnos_ids) < 2:
+            flash('❌ Debes seleccionar al menos 2 alumnos para el espacio colaborativo', 'danger')
+            return redirect(url_for('admin.espacios_colaborativos'))
+        
+        # Crear el espacio colaborativo
+        nuevo_espacio = EspacioColaborativo(
+            titulo=titulo,
+            descripcion=descripcion,
+            fecha_entrega=datetime.strptime(fecha_entrega, '%Y-%m-%d').date() if fecha_entrega else None,
+            creado_por=session.get('profesor_nombre', 'Profesor'),
+            activo=True
+        )
+        
+        db.session.add(nuevo_espacio)
+        db.session.flush()  # Para obtener el ID del espacio
+        
+        # Agregar los miembros al espacio
+        for alumno_id in alumnos_ids:
+            miembro = MiembroEspacio(
+                espacio_id=nuevo_espacio.id,
+                alumno_id=int(alumno_id)
+            )
+            db.session.add(miembro)
+        
+        db.session.commit()
+        
+        # Obtener nombres de los alumnos para el mensaje
+        alumnos = UsuarioAlumno.query.filter(UsuarioAlumno.id.in_([int(id) for id in alumnos_ids])).all()
+        nombres_alumnos = ', '.join([a.nombre_completo for a in alumnos])
+        
+        flash(f'✅ Espacio colaborativo "{titulo}" creado exitosamente con los alumnos: {nombres_alumnos}', 'success')
+        log_info(f"Espacio colaborativo creado: {titulo} con {len(alumnos_ids)} miembros")
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al crear espacio colaborativo: {str(e)}")
+        flash(f'❌ Error al crear el espacio colaborativo: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.espacios_colaborativos'))
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>')
+@require_profesor
+def ver_espacio_colaborativo(espacio_id):
+    """Ver detalles de un espacio colaborativo"""
+    espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+    
+    # Obtener todos los alumnos activos para poder agregar más miembros
+    todos_alumnos = UsuarioAlumno.query.filter_by(activo=True).order_by(UsuarioAlumno.grado_grupo, UsuarioAlumno.nombre_completo).all()
+    
+    # Filtrar alumnos que no están en el espacio
+    alumnos_ids_en_espacio = [m.alumno_id for m in espacio.miembros]
+    alumnos_disponibles = [a for a in todos_alumnos if a.id not in alumnos_ids_en_espacio]
+    
+    return render_template('admin/detalle_espacio_colaborativo.html',
+                         espacio=espacio,
+                         alumnos_disponibles=alumnos_disponibles)
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>/agregar-miembro', methods=['POST'])
+@require_profesor
+def agregar_miembro_espacio(espacio_id):
+    """Agregar un alumno adicional al espacio colaborativo"""
+    try:
+        espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+        alumno_id = request.form.get('alumno_id')
+        
+        if not alumno_id:
+            flash('❌ Debes seleccionar un alumno', 'danger')
+            return redirect(url_for('admin.ver_espacio_colaborativo', espacio_id=espacio_id))
+        
+        # Verificar que el alumno no esté ya en el espacio
+        existe = MiembroEspacio.query.filter_by(espacio_id=espacio_id, alumno_id=alumno_id).first()
+        if existe:
+            flash('❌ Este alumno ya está en el espacio colaborativo', 'warning')
+            return redirect(url_for('admin.ver_espacio_colaborativo', espacio_id=espacio_id))
+        
+        # Agregar el nuevo miembro
+        nuevo_miembro = MiembroEspacio(
+            espacio_id=espacio_id,
+            alumno_id=int(alumno_id)
+        )
+        db.session.add(nuevo_miembro)
+        db.session.commit()
+        
+        alumno = UsuarioAlumno.query.get(alumno_id)
+        flash(f'✅ {alumno.nombre_completo} agregado al espacio colaborativo', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al agregar miembro: {str(e)}")
+        flash(f'❌ Error al agregar miembro: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.ver_espacio_colaborativo', espacio_id=espacio_id))
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>/eliminar-miembro/<int:miembro_id>', methods=['POST'])
+@require_profesor
+def eliminar_miembro_espacio(espacio_id, miembro_id):
+    """Eliminar un alumno del espacio colaborativo"""
+    try:
+        miembro = MiembroEspacio.query.get_or_404(miembro_id)
+        alumno = UsuarioAlumno.query.get(miembro.alumno_id)
+        
+        db.session.delete(miembro)
+        db.session.commit()
+        
+        flash(f'✅ {alumno.nombre_completo} eliminado del espacio colaborativo', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al eliminar miembro: {str(e)}")
+        flash(f'❌ Error al eliminar miembro: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.ver_espacio_colaborativo', espacio_id=espacio_id))
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>/desactivar', methods=['POST'])
+@require_profesor
+def desactivar_espacio_colaborativo(espacio_id):
+    """Desactivar un espacio colaborativo y limpiar sus archivos"""
+    try:
+        espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+        
+        # Eliminar archivos de S3/almacenamiento
+        for archivo in espacio.archivos:
+            try:
+                # Intentar eliminar de S3
+                if s3_manager and archivo.archivo_url.startswith('https://'):
+                    nombre_archivo = archivo.archivo_url.split('/')[-1]
+                    s3_manager.eliminar_archivo(nombre_archivo)
+            except Exception as e:
+                log_error(f"Error al eliminar archivo {archivo.nombre_archivo}: {str(e)}")
+        
+        # Limpiar todos los datos del espacio
+        ArchivoColaborativo.query.filter_by(espacio_id=espacio_id).delete()
+        IdeaColaborativa.query.filter_by(espacio_id=espacio_id).delete()
+        RolAsignado.query.filter_by(espacio_id=espacio_id).delete()
+        
+        # Marcar el espacio como inactivo
+        espacio.activo = False
+        espacio.fecha_desactivacion = datetime.utcnow()
+        
+        db.session.commit()
+        
+        flash(f'✅ Espacio colaborativo "{espacio.titulo}" desactivado y limpiado exitosamente', 'success')
+        log_info(f"Espacio colaborativo desactivado: {espacio.titulo}")
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al desactivar espacio: {str(e)}")
+        flash(f'❌ Error al desactivar el espacio: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.espacios_colaborativos'))
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>/reactivar', methods=['POST'])
+@require_profesor
+def reactivar_espacio_colaborativo(espacio_id):
+    """Reactivar un espacio colaborativo previamente desactivado"""
+    try:
+        espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+        espacio.activo = True
+        espacio.fecha_desactivacion = None
+        
+        db.session.commit()
+        
+        flash(f'✅ Espacio colaborativo "{espacio.titulo}" reactivado exitosamente', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al reactivar espacio: {str(e)}")
+        flash(f'❌ Error al reactivar el espacio: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.espacios_colaborativos'))
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>/eliminar', methods=['POST'])
+@require_profesor
+def eliminar_espacio_colaborativo(espacio_id):
+    """Eliminar permanentemente un espacio colaborativo"""
+    try:
+        espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+        titulo = espacio.titulo
+        
+        # Eliminar archivos de S3/almacenamiento
+        for archivo in espacio.archivos:
+            try:
+                if s3_manager and archivo.archivo_url.startswith('https://'):
+                    nombre_archivo = archivo.archivo_url.split('/')[-1]
+                    s3_manager.eliminar_archivo(nombre_archivo)
+            except Exception as e:
+                log_error(f"Error al eliminar archivo: {str(e)}")
+        
+        # Eliminar el espacio (cascade eliminará todo lo relacionado)
+        db.session.delete(espacio)
+        db.session.commit()
+        
+        flash(f'✅ Espacio colaborativo "{titulo}" eliminado permanentemente', 'success')
+        log_info(f"Espacio colaborativo eliminado: {titulo}")
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al eliminar espacio: {str(e)}")
+        flash(f'❌ Error al eliminar el espacio: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.espacios_colaborativos'))
+
+
+@admin_bp.route('/espacios-colaborativos/<int:espacio_id>/editar', methods=['POST'])
+@require_profesor
+def editar_espacio_colaborativo(espacio_id):
+    """Editar información del espacio colaborativo"""
+    try:
+        espacio = EspacioColaborativo.query.get_or_404(espacio_id)
+        
+        espacio.titulo = request.form.get('titulo', espacio.titulo).strip()
+        espacio.descripcion = request.form.get('descripcion', espacio.descripcion).strip()
+        
+        fecha_entrega = request.form.get('fecha_entrega')
+        if fecha_entrega:
+            espacio.fecha_entrega = datetime.strptime(fecha_entrega, '%Y-%m-%d').date()
+        
+        db.session.commit()
+        
+        flash(f'✅ Espacio colaborativo actualizado exitosamente', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        log_error(f"Error al editar espacio: {str(e)}")
+        flash(f'❌ Error al editar el espacio: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.ver_espacio_colaborativo', espacio_id=espacio_id))

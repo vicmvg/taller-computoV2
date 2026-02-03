@@ -1,5 +1,6 @@
 # web/__init__.py
 from flask import Flask, redirect, url_for, render_template, send_file, send_from_directory, flash
+from flask_wtf.csrf import CSRFProtect
 from .config import Config
 from .extensions import db, cache
 from .routes.auth import auth_bp
@@ -23,6 +24,9 @@ def create_app():
     
     # Inicializar caché
     cache.init_app(app)
+    
+    # 🔒 Inicializar CSRF Protection
+    csrf = CSRFProtect(app)
 
     # 4. Registramos los Blueprints
     app.register_blueprint(auth_bp, url_prefix='/auth')

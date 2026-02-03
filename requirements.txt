@@ -11,3 +11,4 @@ werkzeug
 reportlab
 python-magic==0.4.27
 flask-caching
+Flask-WTF

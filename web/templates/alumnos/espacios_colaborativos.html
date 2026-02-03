@@ -1,94 +1,208 @@
-{% extends "alumnos/base.html" %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mis Espacios Colaborativos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #0d6efd 0%, #0b5ed7 100%);
+            color: white;
+        }
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 20px;
+            margin: 5px 0;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        .sidebar .nav-link i {
+            width: 20px;
+            margin-right: 10px;
+        }
+        .hover-card {
+            transition: all 0.3s ease;
+            border: none;
+        }
+        .hover-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="p-4">
+                    <h4 class="mb-4"><i class="bi bi-pc-display-horizontal"></i> Taller</h4>
+                    <div class="d-flex align-items-center mb-4">
+                        {% if alumno.foto_perfil %}
+                        <div class="position-relative">
+                            <img src="{{ url_for('alumno.ver_archivo', archivo_path=alumno.foto_perfil) }}" 
+                                 alt="Foto de perfil"
+                                 class="rounded-circle border border-3 border-white"
+                                 style="width: 50px; height: 50px; object-fit: cover;">
+                        </div>
+                        {% else %}
+                        <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" 
+                             style="width: 50px; height: 50px; color: #0d6efd; font-weight: bold; font-size: 1.2em;">
+                            {{ session.alumno_nombre[0] }}
+                        </div>
+                        {% endif %}
+                        <div class="ms-3">
+                            <h6 class="mb-0">{{ session.alumno_nombre }}</h6>
+                            <small>{{ session.alumno_grado }}</small>
+                        </div>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.panel') }}">
+                                <i class="bi bi-house-door"></i> Inicio
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.panel') }}#entregas">
+                                <i class="bi bi-folder"></i> Mis Tareas
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.panel') }}#anuncios">
+                                <i class="bi bi-megaphone"></i> Anuncios
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.panel') }}#misiones">
+                                <i class="fas fa-clipboard-check"></i> Misiones
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.panel') }}#chat">
+                                <i class="fas fa-comments"></i> Chat
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.mis_apuntes') }}">
+                                <i class="fas fa-book"></i> Mis Apuntes
+                            </a>
+                        </li>
+                        <!-- ENLACE ACTIVO -->
+                        <li class="nav-item">
+                            <a class="nav-link active" href="{{ url_for('alumno.mis_espacios_colaborativos') }}">
+                                <i class="fas fa-users-cog"></i> Espacios Colaborativos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.ver_mis_archivos') }}">
+                                <i class="bi bi-folder-fill"></i> Mis Archivos
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.solicitar_archivo') }}">
+                                <i class="bi bi-file-earmark-plus"></i> Solicitar Archivo
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('alumno.logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto px-4 py-4">
+                <!-- Header -->
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div>
+                        <h2><i class="fas fa-users-cog me-2"></i>Mis Espacios Colaborativos</h2>
+                        <p class="text-muted">Trabaja en equipo con tus compañeros</p>
+                    </div>
+                </div>
 
-{% block title %}Mis Espacios Colaborativos{% endblock %}
+                <!-- Espacios Colaborativos -->
+                {% if mis_espacios %}
+                    <div class="row">
+                        {% for espacio in mis_espacios %}
+                        <div class="col-md-6 col-lg-4 mb-4">
+                            <div class="card h-100 shadow-sm hover-card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-3">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-folder-open text-primary me-2"></i>
+                                            {{ espacio.titulo }}
+                                        </h5>
+                                        <span class="badge bg-success">Activo</span>
+                                    </div>
 
-{% block content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2><i class="fas fa-users-cog me-2"></i>Mis Espacios Colaborativos</h2>
-            <p class="text-muted">Trabaja en equipo con tus compañeros</p>
+                                    {% if espacio.descripcion %}
+                                    <p class="card-text text-muted small mb-3">
+                                        {{ espacio.descripcion[:100] }}{% if espacio.descripcion|length > 100 %}...{% endif %}
+                                    </p>
+                                    {% endif %}
+
+                                    <div class="mb-3">
+                                        <div class="d-flex align-items-center mb-2">
+                                            <i class="fas fa-users text-primary me-2"></i>
+                                            <small>{{ espacio.miembros|length }} miembros en el equipo</small>
+                                        </div>
+                                        
+                                        {% if espacio.fecha_entrega %}
+                                        <div class="d-flex align-items-center mb-2">
+                                            <i class="fas fa-calendar text-warning me-2"></i>
+                                            <small>Fecha de entrega: {{ espacio.fecha_entrega.strftime('%d/%m/%Y') }}</small>
+                                        </div>
+                                        {% endif %}
+
+                                        <div class="d-flex align-items-center mb-2">
+                                            <i class="fas fa-file text-success me-2"></i>
+                                            <small>{{ espacio.archivos|length }} archivos compartidos</small>
+                                        </div>
+
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-lightbulb text-info me-2"></i>
+                                            <small>{{ espacio.ideas|length }} ideas registradas</small>
+                                        </div>
+                                    </div>
+
+                                    <a href="{{ url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio.id) }}" 
+                                       class="btn btn-primary w-100">
+                                        <i class="fas fa-arrow-right me-2"></i>Entrar al Espacio
+                                    </a>
+                                </div>
+                                <div class="card-footer bg-light text-muted small">
+                                    <i class="fas fa-clock me-1"></i>
+                                    Creado el {{ espacio.fecha_creacion.strftime('%d/%m/%Y') }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="card">
+                        <div class="card-body text-center py-5">
+                            <i class="fas fa-users fa-4x text-muted mb-3"></i>
+                            <h4 class="text-muted">No estás en ningún espacio colaborativo</h4>
+                            <p class="text-muted">
+                                Tu maestro te agregará cuando haya un proyecto en equipo.
+                            </p>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
-    {% if mis_espacios %}
-        <div class="row">
-            {% for espacio in mis_espacios %}
-            <div class="col-md-6 col-lg-4 mb-4">
-                <div class="card h-100 shadow-sm hover-card">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start mb-3">
-                            <h5 class="card-title mb-0">
-                                <i class="fas fa-folder-open text-primary me-2"></i>
-                                {{ espacio.titulo }}
-                            </h5>
-                            <span class="badge bg-success">Activo</span>
-                        </div>
-
-                        {% if espacio.descripcion %}
-                        <p class="card-text text-muted small mb-3">
-                            {{ espacio.descripcion[:100] }}{% if espacio.descripcion|length > 100 %}...{% endif %}
-                        </p>
-                        {% endif %}
-
-                        <div class="mb-3">
-                            <div class="d-flex align-items-center mb-2">
-                                <i class="fas fa-users text-primary me-2"></i>
-                                <small>{{ espacio.miembros|length }} miembros en el equipo</small>
-                            </div>
-                            
-                            {% if espacio.fecha_entrega %}
-                            <div class="d-flex align-items-center mb-2">
-                                <i class="fas fa-calendar text-warning me-2"></i>
-                                <small>Fecha de entrega: {{ espacio.fecha_entrega.strftime('%d/%m/%Y') }}</small>
-                            </div>
-                            {% endif %}
-
-                            <div class="d-flex align-items-center mb-2">
-                                <i class="fas fa-file text-success me-2"></i>
-                                <small>{{ espacio.archivos|length }} archivos compartidos</small>
-                            </div>
-
-                            <div class="d-flex align-items-center">
-                                <i class="fas fa-lightbulb text-info me-2"></i>
-                                <small>{{ espacio.ideas|length }} ideas registradas</small>
-                            </div>
-                        </div>
-
-                        <a href="{{ url_for('alumno.ver_espacio_colaborativo', espacio_id=espacio.id) }}" 
-                           class="btn btn-primary w-100">
-                            <i class="fas fa-arrow-right me-2"></i>Entrar al Espacio
-                        </a>
-                    </div>
-                    <div class="card-footer bg-light text-muted small">
-                        <i class="fas fa-clock me-1"></i>
-                        Creado el {{ espacio.fecha_creacion.strftime('%d/%m/%Y') }}
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    {% else %}
-        <div class="card">
-            <div class="card-body text-center py-5">
-                <i class="fas fa-users fa-4x text-muted mb-3"></i>
-                <h4 class="text-muted">No estás en ningún espacio colaborativo</h4>
-                <p class="text-muted">
-                    Tu maestro te agregará cuando haya un proyecto en equipo.
-                </p>
-            </div>
-        </div>
-    {% endif %}
-</div>
-
-<style>
-.hover-card {
-    transition: all 0.3s ease;
-    border: none;
-}
-.hover-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
-}
-</style>
-{% endblock %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
